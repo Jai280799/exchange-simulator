@@ -10,6 +10,10 @@ class UnknownComponentError(MessageBusError):
     pass
 
 
+class UnknownTopicError(MessageBusError):
+    pass
+
+
 class TopicPermissionError(MessageBusError):
     pass
 
