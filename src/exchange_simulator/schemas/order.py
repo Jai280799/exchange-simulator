@@ -21,8 +21,6 @@ class CreateOrderRequest:
 @dataclass(frozen=True, slots=True)
 class CancelOrderRequest:
     order_id: str
-    strategy_id: str
-    instrument_id: str
     timestamp: dt.datetime
 
 
@@ -32,12 +30,6 @@ class OrderResponse:
     response_status: OrderResponseStatus
     timestamp: dt.datetime
     message: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class OrderKey:
-    order_id: str
-    strategy_id: str
 
 
 @dataclass(slots=True)
@@ -54,7 +46,3 @@ class Order:
     fill_status: OrderFillStatus
     created_timestamp: Final[dt.datetime]
     updated_timestamp: dt.datetime
-
-    @property
-    def key(self) -> OrderKey:
-        return OrderKey(order_id=self.order_id, strategy_id=self.strategy_id)
