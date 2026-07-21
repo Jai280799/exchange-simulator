@@ -1,7 +1,2 @@
-# PyCharm
-.idea/
-*.iml
-out/
-
-# VS Code
-.vscode/
+__pycache__/
+*.pyc

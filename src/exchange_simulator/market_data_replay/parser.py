@@ -1,0 +1,139 @@
+"""Pure parsing of the historical tick CSV into market-data messages.
+
+Each CSV row is a full five-level book snapshot that may also carry the most
+recent trade print (``lastPx``/``size``) and a cumulative ``volume``. This module
+turns a stream of rows into the two published streams:
+
+* every row yields a :class:`MarketDataSnapshot` (book only);
+* a :class:`MarketTradePrint` is yielded only when ``volume`` increases, so the
+  trade stream is reconstructed from the volume delta rather than trusting
+  ``lastPx`` (which repeats across quote-only rows).
+
+Both message types share a single monotonically increasing ``sequence``; within a
+row the snapshot is emitted before its trade print. No I/O or bus dependency here
+so the reconstruction logic is unit-testable in isolation.
+"""
+
+from decimal import Decimal
+from typing import Iterable, Iterator, Mapping, Tuple, Union
+import datetime as dt
+import logging
+
+from exchange_simulator.schemas.market_data import (
+    BookLevel,
+    MarketDataSnapshot,
+    MarketTradePrint,
+)
+
+logger = logging.getLogger(__name__)
+
+MarketDataMessage = Union[MarketDataSnapshot, MarketTradePrint]
+
+_BID_PRICE_COLS = ("BP1", "BP2", "BP3", "BP4", "BP5")
+_BID_SIZE_COLS = ("BV1", "BV2", "BV3", "BV4", "BV5")
+_ASK_PRICE_COLS = ("SP1", "SP2", "SP3", "SP4", "SP5")
+_ASK_SIZE_COLS = ("SV1", "SV2", "SV3", "SV4", "SV5")
+
+
+def _is_blank(value: object) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    return text == "" or text.lower() == "nan"
+
+
+def parse_timestamp(date_str: str, time_value: str) -> dt.datetime:
+    """Combine the ``date`` (YYYY-MM-DD) and ``time`` (HHMMSSmmm) columns.
+
+    ``time`` is stored as an integer with the leading hour zero dropped, e.g.
+    ``90000011`` -> 09:00:00.011.
+    """
+    date = dt.date.fromisoformat(date_str.strip())
+    padded = str(time_value).strip().zfill(9)
+    hour = int(padded[0:2])
+    minute = int(padded[2:4])
+    second = int(padded[4:6])
+    micros = int(padded[6:9]) * 1000
+    return dt.datetime(
+        date.year, date.month, date.day, hour, minute, second, micros
+    )
+
+
+def _parse_levels(
+    row: Mapping[str, str],
+    price_cols: Tuple[str, ...],
+    size_cols: Tuple[str, ...],
+) -> Tuple[BookLevel, ...]:
+    """Build a best-first tuple of book levels, skipping empty levels."""
+    levels = []
+    for price_col, size_col in zip(price_cols, size_cols):
+        price = row.get(price_col)
+        size = row.get(size_col)
+        if _is_blank(price) or _is_blank(size):
+            continue
+        levels.append(
+            BookLevel(price=Decimal(str(price).strip()), quantity=int(float(str(size).strip())))
+        )
+    return tuple(levels)
+
+
+def iter_messages(
+    rows: Iterable[Mapping[str, str]],
+    instrument_id: str,
+    start_sequence: int = 0,
+) -> Iterator[MarketDataMessage]:
+    """Yield the book and trade-print streams for one instrument's rows.
+
+    Rows are assumed to be in chronological order. ``volume`` is treated as a
+    cumulative counter; a decrease (e.g. a new session) resets the baseline
+    without emitting a trade.
+    """
+    sequence = start_sequence
+    prev_volume: int | None = None
+
+    for row in rows:
+        timestamp = parse_timestamp(row["date"], row["time"])
+        bids = _parse_levels(row, _BID_PRICE_COLS, _BID_SIZE_COLS)
+        asks = _parse_levels(row, _ASK_PRICE_COLS, _ASK_SIZE_COLS)
+
+        yield MarketDataSnapshot(
+            instrument_id=instrument_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            bids=bids,
+            asks=asks,
+        )
+        sequence += 1
+
+        if _is_blank(row.get("volume")):
+            continue
+        cumulative_volume = int(float(row["volume"]))
+
+        if prev_volume is None:
+            prev_volume = cumulative_volume
+            if cumulative_volume == 0:
+                continue
+            traded_quantity = cumulative_volume
+        else:
+            traded_quantity = cumulative_volume - prev_volume
+            prev_volume = cumulative_volume
+            if traded_quantity <= 0:
+                continue
+
+        if _is_blank(row.get("lastPx")):
+            logger.warning(
+                "volume advanced by %d at %s but lastPx is blank; skipping trade print",
+                traded_quantity,
+                timestamp,
+            )
+            continue
+
+        yield MarketTradePrint(
+            instrument_id=instrument_id,
+            sequence=sequence,
+            timestamp=timestamp,
+            price=Decimal(str(row["lastPx"]).strip()),
+            quantity=traded_quantity,
+            cumulative_volume=cumulative_volume,
+        )
+        sequence += 1
