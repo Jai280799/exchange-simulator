@@ -4,8 +4,9 @@ from typing import TypeAlias
 
 class StateTopic(StrEnum):
     ORDERS = "orders"
-    TRADES = "trades"
+    MARKET_TRADES = "market_trades"
     MARKET_DATA = "market_data"
+    EXECUTION_REPORT = "execution_report"
 
 
 class RequestTopic(StrEnum):
