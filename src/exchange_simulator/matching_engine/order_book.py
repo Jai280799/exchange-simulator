@@ -37,7 +37,7 @@ class OrderBook:
             return result
 
         if order.order_type == OrderType.MARKET:
-            _logger.info("Market order %s partially filled/unfilled. Cancelling remaining quantity %s", order.order_id, order.remaining_quantity)
+            _logger.debug("Market order %s partially filled/unfilled. Cancelling remaining quantity %s", order.order_id, order.remaining_quantity)
             return result
 
         self.order_cache[order.order_id] = order

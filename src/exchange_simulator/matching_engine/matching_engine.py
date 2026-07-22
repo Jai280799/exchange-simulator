@@ -51,6 +51,7 @@ class MatchingEngine:
                 _logger.error(f"Received message on unexpected topic: {topic}. Please contact developer.")
 
     def _process_create_order_request(self, create_order_request: CreateOrderRequest):
+        _logger.debug("Received create order request: %s", create_order_request)
         publish_response_func = partial(self._publish_response, RequestTopic.CREATE_ORDER)
 
         try:
@@ -103,6 +104,7 @@ class MatchingEngine:
             publish_response_func(order_response)
 
     def _process_cancel_order_request(self, cancel_order_request: CancelOrderRequest):
+        _logger.debug("Received cancel order request: %s", cancel_order_request)
         publish_response_func = partial(self._publish_response, RequestTopic.CANCEL_ORDER)
 
         try:
@@ -129,6 +131,7 @@ class MatchingEngine:
             publish_response_func(order_response)
 
     def _process_market_data_snapshot(self, market_data_snapshot: MarketDataSnapshot) -> None:
+        _logger.debug("Received market data snapshot: %s", market_data_snapshot)
         order_book_result = self._order_book_cache[
             market_data_snapshot.instrument_id
         ].on_market_data_snapshot(market_data_snapshot)
