@@ -64,7 +64,12 @@ def _parse_levels(
     price_cols: Tuple[str, ...],
     size_cols: Tuple[str, ...],
 ) -> Tuple[BookLevel, ...]:
-    """Build a best-first tuple of book levels, skipping empty levels."""
+    """Build a best-first tuple of book levels, skipping empty levels.
+
+    The caller passes columns already in best-first order (BP1..BP5, SP1..SP5), so
+    we trust the source ordering rather than re-sorting: the feed is assumed
+    well-formed (bid1 >= bid2 >= ..., ask1 <= ask2 <= ...).
+    """
     levels = []
     for price_col, size_col in zip(price_cols, size_cols):
         price = row.get(price_col)
