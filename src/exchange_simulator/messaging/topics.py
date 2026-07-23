@@ -4,7 +4,7 @@ from typing import TypeAlias
 
 class StateTopic(StrEnum):
     ORDERS = "orders"
-    MARKET_TRADES = "market_trades"
+    TRADES = "trades"
     MARKET_DATA = "market_data"
     EXECUTION_REPORT = "execution_report"
 

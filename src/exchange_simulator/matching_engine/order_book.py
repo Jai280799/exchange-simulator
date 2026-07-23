@@ -10,7 +10,7 @@ from sortedcontainers import SortedDict
 from exchange_simulator.schemas.common import Side, OrderType
 from exchange_simulator.schemas.market_data import MarketDataSnapshot
 from exchange_simulator.matching_engine import BookOrder, MutableBookLevel, OrderBookResult
-from exchange_simulator.matching_engine.utils.execution_utils import build_execution_report, build_market_trade
+from exchange_simulator.matching_engine.utils.execution_utils import build_execution_report, build_trade
 
 _logger = logging.getLogger(__name__)
 
@@ -111,8 +111,6 @@ class OrderBook:
             trade_quantity = min(order.remaining_quantity, opp_order.remaining_quantity)
             trade_side = order.side
             trade_price = opp_order.price
-            if trade_price is None:
-                raise ValueError(f"Resting order {opp_order.order_id!r} has no price")
 
             self._add_execution_events(result, order, trade_side, trade_price, trade_quantity, opp_order)
 
@@ -143,8 +141,9 @@ class OrderBook:
 
             for order_id in list(buy_orders_at_price.keys()):
                 order = buy_orders_at_price[order_id]
+                trade_price = order.price
                 trade_quantity = min(order.remaining_quantity, best_market_ask_level.quantity)
-                self._add_execution_events(result, order, order.side, best_market_ask_level.price, trade_quantity)
+                self._add_execution_events(result, order, Side.SELL, trade_price, trade_quantity)
                 order.remaining_quantity -= trade_quantity
                 best_market_ask_level.quantity -= trade_quantity
 
@@ -175,8 +174,9 @@ class OrderBook:
 
             for order_id in list(sell_orders_at_price.keys()):
                 order = sell_orders_at_price[order_id]
+                trade_price = order.price
                 trade_quantity = min(order.remaining_quantity, best_market_bid_level.quantity)
-                self._add_execution_events(result, order, order.side, best_market_bid_level.price, trade_quantity)
+                self._add_execution_events(result, order, Side.BUY, trade_price, trade_quantity)
                 order.remaining_quantity -= trade_quantity
                 best_market_bid_level.quantity -= trade_quantity
 
@@ -222,8 +222,8 @@ class OrderBook:
         trade_id = str(uuid4())
         timestamp = dt.datetime.now()
 
-        result.market_trades.append(
-            build_market_trade(
+        result.trades.append(
+            build_trade(
                 trade_id=trade_id,
                 instrument_id=order.instrument_id,
                 side=trade_side,

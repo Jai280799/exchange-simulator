@@ -6,7 +6,7 @@ from exchange_simulator.schemas.common import Side
 
 
 @dataclass(frozen=True, slots=True)
-class MarketTrade:
+class Trade:
     trade_id: str
     instrument_id: str
     side: Side

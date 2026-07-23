@@ -58,7 +58,7 @@ class SystemController:
             published_topics=[
                 ResponseTopic.CREATE_ORDER,
                 ResponseTopic.CANCEL_ORDER,
-                StateTopic.MARKET_TRADES,
+                StateTopic.TRADES,
                 StateTopic.EXECUTION_REPORT
             ]
         )

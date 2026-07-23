@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Final, List
 
 from exchange_simulator.schemas.common import Side, OrderType
-from exchange_simulator.schemas.executions import MarketTrade, ExecutionReport
+from exchange_simulator.schemas.executions import Trade, ExecutionReport
 
 
 @dataclass(slots=True)
@@ -27,10 +27,10 @@ class MutableBookLevel:
 @dataclass(slots=True)
 class OrderBookResult:
     removed_order_ids: List[str] = field(default_factory=list)
-    market_trades: List[MarketTrade] = field(default_factory=list)
+    trades: List[Trade] = field(default_factory=list)
     execution_reports: List[ExecutionReport] = field(default_factory=list)
 
     def extend(self, other: "OrderBookResult") -> None:
         self.removed_order_ids.extend(other.removed_order_ids)
-        self.market_trades.extend(other.market_trades)
+        self.trades.extend(other.trades)
         self.execution_reports.extend(other.execution_reports)
