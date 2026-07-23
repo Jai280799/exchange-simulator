@@ -1,0 +1,4 @@
+interface:
+  display_name: "Exchange Architecture Guard"
+  short_description: "Check changes against exchange architecture"
+  default_prompt: "Use $exchange-architecture-guard to check this change against our accepted architecture and message contracts."

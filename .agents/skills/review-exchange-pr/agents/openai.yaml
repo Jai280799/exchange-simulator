@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Exchange PR"
+  short_description: "Review exchange-simulator pull requests"
+  default_prompt: "Use $review-exchange-pr to review this pull request against the latest branch head and project contracts."
