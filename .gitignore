@@ -1,7 +1,9 @@
-# PyCharm
-.idea/
-*.iml
-out/
+__pycache__/
+*.pyc
 
-# VS Code
+# IDE / editor
+.idea/
 .vscode/
+
+# OS
+.DS_Store
