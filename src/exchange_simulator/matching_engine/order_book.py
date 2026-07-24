@@ -2,7 +2,7 @@ from collections import OrderedDict, deque
 import datetime as dt
 import logging
 from decimal import Decimal
-from typing import Dict, Optional, Deque
+from typing import Dict, Optional, Deque, Tuple
 from uuid import uuid4
 
 from sortedcontainers import SortedDict
@@ -30,8 +30,7 @@ class OrderBook:
         self.market_data_ask_levels: Deque[MutableBookLevel] = deque()
 
     def add_order(self, order: BookOrder) -> OrderBookResult:
-        result = self._match_order(order)
-        result.extend(self._match_incoming_order_against_market(order))
+        result = self._match_incoming_order(order)
 
         if order.remaining_quantity <= 0:
             return result
@@ -85,23 +84,82 @@ class OrderBook:
             for book_level in market_data_snapshot.asks
         )
 
-    def _match_order(self, order: BookOrder) -> OrderBookResult:
+    def _match_incoming_order(self, order: BookOrder) -> OrderBookResult:
         result = OrderBookResult()
         is_buy = order.side == Side.BUY
         opposite_price_level_cache = self.ask_price_level_order_cache if is_buy else self.bid_price_level_order_cache
-
         best_price_index = 0 if is_buy else -1
+        opposite_market_levels = self.market_data_ask_levels if is_buy else self.market_data_bid_levels
 
-        while order.remaining_quantity > 0 and opposite_price_level_cache:
-            best_price, opp_orders_at_price = opposite_price_level_cache.peekitem(best_price_index)
-            if order.order_type == OrderType.LIMIT:
-                if is_buy and order.price < best_price:
-                    break
-                elif not is_buy and order.price > best_price:
-                    break
+        while order.remaining_quantity > 0:
+            self._remove_empty_market_levels(opposite_market_levels)
 
-            result.extend(self._execute_order(order, opp_orders_at_price))
+            internal_match = self._get_best_internal_match(order, opposite_price_level_cache, best_price_index)
+            market_match = self._get_best_market_match(order, opposite_market_levels)
+
+            if internal_match is None and market_match is None:
+                break
+
+            if self._should_match_internal_first(order.side, internal_match, market_match):
+                _, opp_orders_at_price = internal_match
+                result.extend(self._execute_order(order, opp_orders_at_price))
+            elif market_match is not None:
+                result.extend(self._execute_order_against_market_level(order, market_match))
+
         return result
+
+    def _get_best_internal_match(self, order: BookOrder, opposite_price_level_cache: SortedDict[Decimal, OrderedDict[str, BookOrder]],
+                                 best_price_index: int) -> Optional[Tuple[Decimal, OrderedDict[str, BookOrder]]]:
+        if not opposite_price_level_cache:
+            return None
+
+        best_price, opp_orders_at_price = opposite_price_level_cache.peekitem(best_price_index)
+        if not self._is_executable_price(order, best_price):
+            return None
+
+        return best_price, opp_orders_at_price
+
+    def _get_best_market_match(self, order: BookOrder, opposite_market_levels: Deque[MutableBookLevel]) -> Optional[MutableBookLevel]:
+        if not opposite_market_levels:
+            return None
+
+        best_market_level = opposite_market_levels[0]
+        if not self._is_executable_price(order, best_market_level.price):
+            return None
+
+        return best_market_level
+
+    def _is_executable_price(self, order: BookOrder, price: Decimal) -> bool:
+        if order.order_type == OrderType.MARKET:
+            return True
+
+        if order.price is None:
+            raise ValueError(f"Limit order {order.order_id!r} has no price")
+
+        if order.side == Side.BUY:
+            return order.price >= price
+
+        return order.price <= price
+
+    def _should_match_internal_first(self, side: Side, internal_match: Optional[Tuple[Decimal, OrderedDict[str, BookOrder]]],
+                                     market_match: Optional[MutableBookLevel]) -> bool:
+        if internal_match is None:
+            return False
+
+        if market_match is None:
+            return True
+
+        internal_price = internal_match[0]
+        market_price = market_match.price
+
+        if side == Side.BUY:
+            return internal_price <= market_price
+
+        return internal_price >= market_price
+
+    def _remove_empty_market_levels(self, market_levels: Deque[MutableBookLevel]) -> None:
+        while market_levels and market_levels[0].quantity <= 0:
+            market_levels.popleft()
 
     def _execute_order(self, order: BookOrder, opp_orders_at_price: OrderedDict[str, BookOrder]) -> OrderBookResult:
         result = OrderBookResult()
@@ -124,6 +182,15 @@ class OrderBook:
 
             if order.remaining_quantity <= 0:
                 break
+        return result
+
+    def _execute_order_against_market_level(self, order: BookOrder, market_level: MutableBookLevel) -> OrderBookResult:
+        result = OrderBookResult()
+        trade_quantity = min(order.remaining_quantity, market_level.quantity)
+        self._add_execution_events(result, order, order.side, market_level.price, trade_quantity)
+
+        order.remaining_quantity -= trade_quantity
+        market_level.quantity -= trade_quantity
         return result
 
     def _match_resting_buy_orders_against_market_asks(self) -> OrderBookResult:
@@ -189,31 +256,6 @@ class OrderBook:
                     self.market_data_bid_levels.popleft()
                     break
 
-        return result
-
-    def _match_incoming_order_against_market(self, order: BookOrder) -> OrderBookResult:
-        result = OrderBookResult()
-        opp_market_data_levels = self.market_data_ask_levels if order.side == Side.BUY else self.market_data_bid_levels
-
-        while order.remaining_quantity > 0 and opp_market_data_levels:
-            best_market_level = opp_market_data_levels[0]
-            if best_market_level.quantity <= 0:
-                opp_market_data_levels.popleft()
-                continue
-
-            if order.order_type == OrderType.LIMIT:
-                if order.side == Side.BUY and order.price < best_market_level.price:
-                    break
-                elif order.side == Side.SELL and order.price > best_market_level.price:
-                    break
-
-            trade_quantity = min(order.remaining_quantity, best_market_level.quantity)
-            self._add_execution_events(result, order, order.side, best_market_level.price, trade_quantity)
-            order.remaining_quantity -= trade_quantity
-            best_market_level.quantity -= trade_quantity
-
-            if best_market_level.quantity <= 0:
-                opp_market_data_levels.popleft()
         return result
 
     def _add_execution_events(self, result: OrderBookResult, order: BookOrder,
