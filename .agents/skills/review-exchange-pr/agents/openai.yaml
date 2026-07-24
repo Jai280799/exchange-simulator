@@ -1,4 +1,4 @@
 interface:
   display_name: "Review Exchange PR"
-  short_description: "Review exchange-simulator pull requests"
-  default_prompt: "Use $review-exchange-pr to review this pull request against the latest branch head and project contracts."
+  short_description: "Review PRs for contract and documentation drift"
+  default_prompt: "Use $review-exchange-pr to review this pull request against the exact head, project documents, code contracts, and tests."

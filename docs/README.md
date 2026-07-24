@@ -11,11 +11,13 @@ pull requests are in flight.
    invariants, and integration sequence.
 2. [Message contracts](message-contracts.md) — topics, producers, consumers,
    schemas, and routing assumptions.
-3. [Demo runbook](demo-runbook.md) — one-command presentation lifecycle,
+3. [Market-data interface](market-data-interface.md) — exact snapshot and trade
+   payloads, multiprocessing transport, and integration examples.
+4. [Demo runbook](demo-runbook.md) — one-command presentation lifecycle,
    observable progress, outputs, and rehearsal checks.
-4. [Open questions](open-questions.md) — decisions that are not settled and must
+5. [Open questions](open-questions.md) — decisions that are not settled and must
    not be inferred from temporary code.
-5. [Decision records](decisions/) — accepted architecture decisions and their
+6. [Decision records](decisions/) — accepted architecture decisions and their
    consequences.
 
 ## Document status vocabulary

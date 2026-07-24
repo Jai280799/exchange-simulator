@@ -12,6 +12,10 @@ Last updated: **2026-07-23**
 - Historical market events and simulated exchange events retain distinct
   provenance.
 
+For the exact market-data dataclasses, ordering guarantees, bus behavior,
+consumer loop, and dummy-publisher example, see the
+[market-data interface](market-data-interface.md).
+
 ## Topic matrix
 
 | Topic | Producer | Intended consumer | Schema | Visibility | Status |
