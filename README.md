@@ -6,6 +6,13 @@
 - JITENDRA JAIN, Jai
 - KONG, Lington
 
+## Architecture and decisions
+
+Start with [`docs/README.md`](docs/README.md) for the current architecture,
+cross-component message contracts, accepted decision records, and unresolved
+questions. These documents are the source of truth when temporary pull-request
+code and settled design differ.
+
 ## Environment Setup (Python 3.13)
 
 Use Python **3.13.x** (latest patch version is fine).
