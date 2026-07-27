@@ -1,11 +1,12 @@
 from enum import StrEnum
-from typing import TypeAlias, Union
+from typing import TypeAlias
 
 
 class StateTopic(StrEnum):
     ORDERS = "orders"
     TRADES = "trades"
     MARKET_DATA = "market_data"
+    MARKET_TRADES = "market_trades"
 
 
 class RequestTopic(StrEnum):
@@ -18,4 +19,4 @@ class ResponseTopic(StrEnum):
     CANCEL_ORDER = "cancel_order_response"
 
 
-Topic: TypeAlias = Union[StateTopic, RequestTopic, ResponseTopic]
+Topic: TypeAlias = StateTopic | RequestTopic | ResponseTopic

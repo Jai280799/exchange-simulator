@@ -10,7 +10,11 @@ class UnknownComponentError(MessageBusError):
     pass
 
 
-class UnknownTopicError(MessageBusError):
+class TopologyAlreadyFinalizedError(MessageBusError):
+    pass
+
+
+class TopologyNotFinalizedError(MessageBusError):
     pass
 
 

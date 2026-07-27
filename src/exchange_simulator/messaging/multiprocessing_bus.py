@@ -8,6 +8,8 @@ from exchange_simulator.messaging.component_spec import ComponentSpec
 from exchange_simulator.messaging.exceptions import (
     DuplicateComponentError,
     MessageTypeError,
+    TopologyAlreadyFinalizedError,
+    TopologyNotFinalizedError,
     TopicPermissionError,
     UnknownComponentError,
 )
@@ -30,7 +32,6 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
 
     def publish(self, topic: Topic, message: Any) -> None:
         if topic not in self.published_topics:
-            logger.error("Component %s tried to publish to unauthorized topic %s", self.component_name, topic)
             raise TopicPermissionError(f"Component {self.component_name!r} cannot publish to topic {topic!s}")
 
         self._validate_message_type(topic, message)
@@ -70,12 +71,6 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
         if expected_type is None or isinstance(message, expected_type):
             return
 
-        logger.error(
-            "Invalid message type for topic %s: expected %s, got %s",
-            topic,
-            expected_type.__name__,
-            type(message).__name__,
-        )
         raise MessageTypeError(f"Topic {topic!s} expects {expected_type.__name__}, got {type(message).__name__}")
 
 
@@ -90,10 +85,13 @@ class MultiprocessingMessageBusTopology:
         self._component_specs: Dict[str, ComponentSpec] = {}
         self._component_inboxes: Dict[str, Queue] = {}
         self._subscribers: DefaultDict[Topic, List[Queue]] = defaultdict(list)
+        self._finalized = False
 
     def register_component(self, spec: ComponentSpec) -> None:
+        if self._finalized:
+            raise TopologyAlreadyFinalizedError("Cannot register component after topology is finalized")
+
         if spec.name in self._component_specs:
-            logger.error("Duplicate messaging component registration: %s", spec.name)
             raise DuplicateComponentError(f"Component {spec.name!r} is already registered")
 
         input_queue: Queue[Any] = Queue()
@@ -109,10 +107,15 @@ class MultiprocessingMessageBusTopology:
             len(spec.published_topics),
         )
 
+    def finalize(self) -> None:
+        self._finalized = True
+
     def create_component_bus(self, component_name: str) -> MultiprocessingComponentMessageBus:
+        if not self._finalized:
+            raise TopologyNotFinalizedError("Cannot create component bus before topology is finalized")
+
         spec = self._component_specs.get(component_name)
         if spec is None:
-            logger.error("Unknown messaging component requested: %s", component_name)
             raise UnknownComponentError(f"Component {component_name!r} is not registered")
 
         output_queues = {
