@@ -1,0 +1,4 @@
+interface:
+  display_name: "Exchange Architecture Guard"
+  short_description: "Align exchange docs, code, tests, and contracts"
+  default_prompt: "Use $exchange-architecture-guard to answer this architecture question by reconciling the documented contract with the exact code and tests."
