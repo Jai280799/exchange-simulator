@@ -11,7 +11,9 @@ from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
 
 INSTRUMENT_ID = "2603"
 STRATEGY_ID = "test-strategy"
-TIMESTAMP = dt.datetime(2026, 1, 1, 9, 30)
+ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 30)
+INCOMING_ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 31)
+MARKET_DATA_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 32)
 
 
 @pytest.fixture
@@ -20,7 +22,8 @@ def order_book() -> OrderBook:
 
 
 def build_order(order_id: str, side: Side, quantity: int, price: Decimal | None = None,
-                order_type: OrderType = OrderType.LIMIT) -> BookOrder:
+                order_type: OrderType = OrderType.LIMIT,
+                creation_request_timestamp: dt.datetime = ORDER_TIMESTAMP) -> BookOrder:
     return BookOrder(
         order_id=order_id,
         strategy_id=STRATEGY_ID,
@@ -30,14 +33,19 @@ def build_order(order_id: str, side: Side, quantity: int, price: Decimal | None 
         quantity=quantity,
         remaining_quantity=quantity,
         price=price,
+        creation_request_timestamp=creation_request_timestamp,
     )
 
 
-def build_market_data_snapshot(bids: tuple[BookLevel, ...] = (), asks: tuple[BookLevel, ...] = ()) -> MarketDataSnapshot:
+def build_market_data_snapshot(
+    bids: tuple[BookLevel, ...] = (),
+    asks: tuple[BookLevel, ...] = (),
+    timestamp: dt.datetime = MARKET_DATA_TIMESTAMP,
+) -> MarketDataSnapshot:
     return MarketDataSnapshot(
         instrument_id=INSTRUMENT_ID,
         sequence=1,
-        timestamp=TIMESTAMP,
+        timestamp=timestamp,
         bids=bids,
         asks=asks,
     )
@@ -68,6 +76,13 @@ def assert_trade_events(result, expected_trade_events: list[tuple[Side, Decimal,
     assert [(trade.side, trade.price, trade.quantity) for trade in result.trades] == expected_trade_events
 
 
+def assert_event_timestamps(result, expected_timestamp: dt.datetime) -> None:
+    assert [trade.timestamp for trade in result.trades] == [expected_timestamp] * len(result.trades)
+    assert [execution_report.timestamp for execution_report in result.execution_reports] == [
+        expected_timestamp
+    ] * len(result.execution_reports)
+
+
 def assert_resting_order_execution_order(result, expected_order_ids: list[str]) -> None:
     expected_order_ids_set = set(expected_order_ids)
     actual_order_ids = [
@@ -87,13 +102,20 @@ def test_incoming_buy_matches_better_market_ask_before_internal_ask(order_book: 
     )
     order_book.on_market_data_snapshot(market_data_snapshot)
 
-    incoming_buy_order = build_order("buy-incoming", Side.BUY, quantity=20, price=Decimal("110"))
+    incoming_buy_order = build_order(
+        "buy-incoming",
+        Side.BUY,
+        quantity=20,
+        price=Decimal("110"),
+        creation_request_timestamp=INCOMING_ORDER_TIMESTAMP,
+    )
     result = order_book.add_order(incoming_buy_order)
 
     assert_trade_events(result, [
         (Side.BUY, Decimal("100"), 10),
         (Side.BUY, Decimal("105"), 10),
     ])
+    assert_event_timestamps(result, INCOMING_ORDER_TIMESTAMP)
     assert result.removed_order_ids == ["sell-internal"]
     assert incoming_buy_order.remaining_quantity == 0
     assert_order_removed_from_order_book(order_book, resting_sell_order, is_price_level_removed=True)
@@ -287,6 +309,7 @@ def test_market_data_snapshot_matches_resting_buys_fifo_at_resting_order_price(o
         (Side.SELL, Decimal("105"), 10),
         (Side.SELL, Decimal("105"), 10),
     ])
+    assert_event_timestamps(result, MARKET_DATA_TIMESTAMP)
     assert [execution_report.order_id for execution_report in result.execution_reports] == ["buy-1", "buy-2"]
     assert result.removed_order_ids == ["buy-1", "buy-2"]
     assert_order_removed_from_order_book(order_book, first_buy_order, is_price_level_removed=True)

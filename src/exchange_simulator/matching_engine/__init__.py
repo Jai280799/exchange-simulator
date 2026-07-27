@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Final, List
+import datetime as dt
 
 from exchange_simulator.schemas.common import Side, OrderType
 from exchange_simulator.schemas.executions import Trade, ExecutionReport
@@ -16,6 +17,7 @@ class BookOrder:
     quantity: Final[int]
     remaining_quantity: int
     price: Final[Decimal | None]
+    creation_request_timestamp: dt.datetime
 
 
 @dataclass(slots=True)

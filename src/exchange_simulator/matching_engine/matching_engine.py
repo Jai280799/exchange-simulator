@@ -80,6 +80,7 @@ class MatchingEngine:
             quantity=create_order_request.quantity,
             remaining_quantity=create_order_request.quantity,
             price=create_order_request.price,
+            creation_request_timestamp=create_order_request.timestamp
         )
 
         order_book_result = self._order_book_cache[book_order.instrument_id].add_order(book_order)

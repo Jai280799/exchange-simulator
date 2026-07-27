@@ -70,8 +70,8 @@ class OrderBook:
         result = OrderBookResult()
         self._update_market_data_levels(market_data_snapshot)
 
-        result.extend(self._match_resting_buy_orders_against_market_asks())
-        result.extend(self._match_resting_sell_orders_against_market_bids())
+        result.extend(self._match_resting_buy_orders_against_market_asks(market_data_snapshot.timestamp))
+        result.extend(self._match_resting_sell_orders_against_market_bids(market_data_snapshot.timestamp))
         return result
 
     def _update_market_data_levels(self, market_data_snapshot: MarketDataSnapshot) -> None:
@@ -170,7 +170,7 @@ class OrderBook:
             trade_side = order.side
             trade_price = opp_order.price
 
-            self._add_execution_events(result, order, trade_side, trade_price, trade_quantity, opp_order)
+            self._add_execution_events(result, order, trade_side, trade_price, trade_quantity, order.creation_request_timestamp, opp_order)
 
             order.remaining_quantity -= trade_quantity
             opp_order.remaining_quantity -= trade_quantity
@@ -187,13 +187,13 @@ class OrderBook:
     def _execute_order_against_market_level(self, order: BookOrder, market_level: MutableBookLevel) -> OrderBookResult:
         result = OrderBookResult()
         trade_quantity = min(order.remaining_quantity, market_level.quantity)
-        self._add_execution_events(result, order, order.side, market_level.price, trade_quantity)
+        self._add_execution_events(result, order, order.side, market_level.price, trade_quantity, order.creation_request_timestamp)
 
         order.remaining_quantity -= trade_quantity
         market_level.quantity -= trade_quantity
         return result
 
-    def _match_resting_buy_orders_against_market_asks(self) -> OrderBookResult:
+    def _match_resting_buy_orders_against_market_asks(self, market_data_snapshot_timestamp: dt.datetime) -> OrderBookResult:
         result = OrderBookResult()
         while self.bid_price_level_order_cache and self.market_data_ask_levels:
             best_bid_price, buy_orders_at_price = self.bid_price_level_order_cache.peekitem(-1)
@@ -210,7 +210,7 @@ class OrderBook:
                 order = buy_orders_at_price[order_id]
                 trade_price = order.price
                 trade_quantity = min(order.remaining_quantity, best_market_ask_level.quantity)
-                self._add_execution_events(result, order, Side.SELL, trade_price, trade_quantity)
+                self._add_execution_events(result, order, Side.SELL, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity
                 best_market_ask_level.quantity -= trade_quantity
 
@@ -225,7 +225,7 @@ class OrderBook:
 
         return result
 
-    def _match_resting_sell_orders_against_market_bids(self) -> OrderBookResult:
+    def _match_resting_sell_orders_against_market_bids(self, market_data_snapshot_timestamp: dt.datetime) -> OrderBookResult:
         result = OrderBookResult()
 
         while self.ask_price_level_order_cache and self.market_data_bid_levels:
@@ -243,7 +243,7 @@ class OrderBook:
                 order = sell_orders_at_price[order_id]
                 trade_price = order.price
                 trade_quantity = min(order.remaining_quantity, best_market_bid_level.quantity)
-                self._add_execution_events(result, order, Side.BUY, trade_price, trade_quantity)
+                self._add_execution_events(result, order, Side.BUY, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity
                 best_market_bid_level.quantity -= trade_quantity
 
@@ -260,9 +260,8 @@ class OrderBook:
 
     def _add_execution_events(self, result: OrderBookResult, order: BookOrder,
                               trade_side: Side, trade_price: Decimal, trade_quantity: int,
-                              opp_order: Optional[BookOrder] = None) -> None:
+                              timestamp: dt.datetime, opp_order: Optional[BookOrder] = None) -> None:
         trade_id = str(uuid4())
-        timestamp = dt.datetime.now()
 
         result.trades.append(
             build_trade(
