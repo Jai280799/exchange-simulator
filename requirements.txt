@@ -1,1 +1,2 @@
-pyzmq==27.0.0
+sortedcontainers==2.4.0
+sortedcontainers-stubs==2.4.3

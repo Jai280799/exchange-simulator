@@ -6,6 +6,7 @@ class StateTopic(StrEnum):
     ORDERS = "orders"
     TRADES = "trades"
     MARKET_DATA = "market_data"
+    EXECUTION_REPORT = "execution_report"
     MARKET_TRADES = "market_trades"
 
 
