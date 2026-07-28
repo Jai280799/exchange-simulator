@@ -59,7 +59,7 @@ def test_feed_publishes_snapshots_and_trades_to_correct_topics(tmp_path):
 
     assert count == 3
     topics = [t for t, _ in bus.published]
-    assert topics == [StateTopic.MARKET_DATA, StateTopic.MARKET_TRADES, StateTopic.MARKET_DATA]
+    assert topics == [StateTopic.MARKET_TRADES, StateTopic.MARKET_DATA, StateTopic.MARKET_DATA]
 
     md = [m for t, m in bus.published if t == StateTopic.MARKET_DATA]
     trades = [m for t, m in bus.published if t == StateTopic.MARKET_TRADES]

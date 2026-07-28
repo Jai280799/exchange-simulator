@@ -117,6 +117,12 @@ def test_matching_engine_receives_create_order_request_and_publishes_response() 
     assert response.response_status == OrderResponseStatus.ACCEPTED
 
 
+def test_matching_engine_component_subscribes_to_historical_trade_prints() -> None:
+    spec = build_matching_engine_component_spec()
+
+    assert StateTopic.MARKET_TRADES in spec.subscribed_topics
+
+
 def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orders() -> None:
     topology = MultiprocessingMessageBusTopology()
     topology.register_component(build_matching_engine_component_spec())

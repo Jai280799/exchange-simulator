@@ -21,7 +21,7 @@ consumer loop, and dummy-publisher example, see the
 | Topic | Producer | Intended consumer | Schema | Visibility | Status |
 |---|---|---|---|---|---|
 | `StateTopic.MARKET_DATA` | Historical feed | Matching engine, platform, market-data consumers | `MarketDataSnapshot` | Public market observation | On `master`; extended by PR #15 |
-| `StateTopic.MARKET_TRADES` | Historical feed | Platform, strategies, future passive-fill/queue model | `MarketTradePrint` | Public historical observation | In flight in PR #15 |
+| `StateTopic.MARKET_TRADES` | Historical feed | Matching engine, platform, strategies, passive-fill/queue consumers | `MarketTradePrint` | Public historical observation | Implemented; used by matching passive queue model |
 | `StateTopic.TRADES` | Matching engine | Platform and public simulated-trade consumers | `Trade` or an explicitly renamed simulated-trade schema | Public simulated event | Topic exists on `master`; PR #14 must preserve it |
 | `RequestTopic.CREATE_ORDER` | Trading platform | Matching engine | `CreateOrderRequest` | Trusted request | On `master` |
 | `ResponseTopic.CREATE_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
@@ -55,9 +55,12 @@ In-flight PR #15 contract:
 - `price`
 - `quantity`
 - `cumulative_volume`
+- `aggressor_side`: inferred `Side.BUY`, inferred `Side.SELL`, or `None`
 
 This is a historical observation reconstructed from the source data. It is not a
-strategy execution and must not be published on `TRADES`.
+strategy execution and must not be published on `TRADES`. `aggressor_side` is a
+conservative inference used by queue-position consumers; it is not a native
+source-field guarantee.
 
 ### Simulated `Trade`
 
@@ -118,6 +121,8 @@ the message or a platform-owned order-to-strategy mapping.
 ## Provenance and ordering
 
 - Historical `sequence` orders messages emitted by the historical feed.
+- The matching engine uses `MarketTradePrint.aggressor_side` to advance passive
+  strategy queue position; simulated fills remain published on `TRADES`.
 - Simulated engine events require their own deterministic ordering policy; they
   must not reuse historical sequence numbers as if both streams shared one global
   clock.

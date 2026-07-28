@@ -18,6 +18,7 @@ class BookOrder:
     remaining_quantity: int
     price: Final[Decimal | None]
     creation_request_timestamp: dt.datetime
+    queue_ahead: int = 0
 
 
 @dataclass(slots=True)

@@ -8,7 +8,7 @@ from exchange_simulator.matching_engine.market_impact.models import MarketDepthI
 from exchange_simulator.matching_engine.order_book import OrderBook
 from exchange_simulator.schemas.common import OrderType, Side
 from exchange_simulator.schemas.instrument import Instrument
-from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
+from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot, MarketTradePrint
 
 
 INSTRUMENT_ID = "XHKG:2603"
@@ -63,6 +63,19 @@ def build_market_data_snapshot(
         timestamp=timestamp,
         bids=bids,
         asks=asks,
+    )
+
+
+def build_market_trade_print(price: Decimal, quantity: int, aggressor_side: Side | None,
+                             timestamp: dt.datetime = MARKET_DATA_TIMESTAMP) -> MarketTradePrint:
+    return MarketTradePrint(
+        instrument_id=INSTRUMENT_ID,
+        sequence=2,
+        timestamp=timestamp,
+        price=price,
+        quantity=quantity,
+        cumulative_volume=quantity,
+        aggressor_side=aggressor_side,
     )
 
 
@@ -329,6 +342,91 @@ def test_market_data_snapshot_matches_resting_buys_fifo_at_resting_order_price(o
     assert result.removed_order_ids == ["buy-1", "buy-2"]
     assert_order_removed_from_order_book(order_book, first_buy_order, is_price_level_removed=True)
     assert_order_removed_from_order_book(order_book, second_buy_order, is_price_level_removed=True)
+
+
+def test_equal_price_snapshot_does_not_fill_resting_buy_before_queue_turnover(order_book: OrderBook) -> None:
+    order_book.on_market_data_snapshot(
+        build_market_data_snapshot(bids=(BookLevel(price=Decimal("100"), quantity=100),))
+    )
+    buy_order = build_order("buy-resting", Side.BUY, quantity=50, price=Decimal("100"))
+    order_book.add_order(buy_order)
+
+    result = order_book.on_market_data_snapshot(
+        build_market_data_snapshot(asks=(BookLevel(price=Decimal("100"), quantity=50),))
+    )
+
+    assert_trade_events(result, [])
+    assert buy_order.queue_ahead == 100
+    assert_order_resting_in_order_book(order_book, buy_order, expected_remaining_quantity=50)
+
+
+def test_sell_market_trade_eats_bid_queue_before_filling_resting_buy(order_book: OrderBook) -> None:
+    order_book.on_market_data_snapshot(
+        build_market_data_snapshot(bids=(BookLevel(price=Decimal("100"), quantity=100),))
+    )
+    buy_order = build_order("buy-resting", Side.BUY, quantity=50, price=Decimal("100"))
+    order_book.add_order(buy_order)
+
+    first_result = order_book.on_market_trade_print(build_market_trade_print(Decimal("100"), 80, Side.SELL))
+    assert_trade_events(first_result, [])
+    assert buy_order.queue_ahead == 20
+
+    second_result = order_book.on_market_trade_print(build_market_trade_print(Decimal("100"), 30, Side.SELL))
+    assert_trade_events(second_result, [(Side.SELL, Decimal("100"), 10)])
+    assert_order_resting_in_order_book(order_book, buy_order, expected_remaining_quantity=40)
+    assert buy_order.queue_ahead == 0
+
+
+def test_buy_market_trade_eats_ask_queue_before_filling_resting_sell(order_book: OrderBook) -> None:
+    order_book.on_market_data_snapshot(
+        build_market_data_snapshot(asks=(BookLevel(price=Decimal("101"), quantity=100),))
+    )
+    sell_order = build_order("sell-resting", Side.SELL, quantity=50, price=Decimal("101"))
+    order_book.add_order(sell_order)
+
+    first_result = order_book.on_market_trade_print(build_market_trade_print(Decimal("101"), 80, Side.BUY))
+    assert_trade_events(first_result, [])
+    assert sell_order.queue_ahead == 20
+
+    second_result = order_book.on_market_trade_print(build_market_trade_print(Decimal("101"), 30, Side.BUY))
+    assert_trade_events(second_result, [(Side.BUY, Decimal("101"), 10)])
+    assert_order_resting_in_order_book(order_book, sell_order, expected_remaining_quantity=40)
+    assert sell_order.queue_ahead == 0
+
+
+def test_market_trade_print_fills_internal_orders_fifo_after_external_queue(order_book: OrderBook) -> None:
+    order_book.on_market_data_snapshot(
+        build_market_data_snapshot(bids=(BookLevel(price=Decimal("100"), quantity=100),))
+    )
+    first_buy_order = build_order("buy-1", Side.BUY, quantity=50, price=Decimal("100"))
+    second_buy_order = build_order("buy-2", Side.BUY, quantity=50, price=Decimal("100"))
+    order_book.add_order(first_buy_order)
+    order_book.add_order(second_buy_order)
+
+    result = order_book.on_market_trade_print(build_market_trade_print(Decimal("100"), 175, Side.SELL))
+
+    assert_trade_events(result, [
+        (Side.SELL, Decimal("100"), 50),
+        (Side.SELL, Decimal("100"), 25),
+    ])
+    assert result.removed_order_ids == ["buy-1"]
+    assert_order_removed_from_order_book(order_book, first_buy_order, is_price_level_removed=False)
+    assert_order_resting_in_order_book(order_book, second_buy_order, expected_remaining_quantity=25)
+    assert second_buy_order.queue_ahead == 0
+
+
+def test_market_trade_print_without_aggressor_side_does_not_fill_resting_order(order_book: OrderBook) -> None:
+    order_book.on_market_data_snapshot(
+        build_market_data_snapshot(bids=(BookLevel(price=Decimal("100"), quantity=100),))
+    )
+    buy_order = build_order("buy-resting", Side.BUY, quantity=50, price=Decimal("100"))
+    order_book.add_order(buy_order)
+
+    result = order_book.on_market_trade_print(build_market_trade_print(Decimal("100"), 200, None))
+
+    assert_trade_events(result, [])
+    assert buy_order.queue_ahead == 100
+    assert_order_resting_in_order_book(order_book, buy_order, expected_remaining_quantity=50)
 
 
 def test_market_depth_impact_model_worsens_deeper_market_prices() -> None:

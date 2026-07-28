@@ -38,7 +38,7 @@ flowchart LR
     SC -. starts/stops .-> PLATFORM
     SC -. starts/stops .-> STRATEGY
 
-    FEED -- MARKET_DATA<br/>historical snapshots --> ENGINE
+    FEED -- MARKET_DATA / MARKET_TRADES<br/>historical observations --> ENGINE
     FEED -- MARKET_DATA / MARKET_TRADES<br/>market observations --> PLATFORM
     STRATEGY -- order intent --> PLATFORM
     PLATFORM -- CREATE_ORDER / CANCEL_ORDER --> ENGINE
@@ -66,7 +66,9 @@ are declared centrally through `ComponentSpec` objects.
 
 - Stream CSV or gzip input without loading a full day into memory.
 - Publish ordered five-level `MarketDataSnapshot` messages.
-- Publish historical `MarketTradePrint` messages reconstructed from source data.
+- Publish historical `MarketTradePrint` messages reconstructed from source data,
+  including a conservative aggressor-side inference when the trade price can be
+  classified against the surrounding book.
 - Preserve historical data as fixed ground truth.
 - Never alter future historical messages because of simulated strategy trades.
 - Signal completion through the system lifecycle protocol once that protocol is
@@ -78,6 +80,8 @@ are declared centrally through `ComponentSpec` objects.
 - Maintain strategy orders using the selected price/time policy.
 - Use the latest historical snapshot as external liquidity under the baseline
   two-book model.
+- Use historical trade prints to advance passive queue position for same-price
+  resting orders.
 - Publish responses on response topics, simulated trades on `TRADES`, and
   execution reports through the agreed private-routing path.
 - Keep historical trade prints and simulated executions semantically separate.
@@ -157,7 +161,11 @@ current PR #14 implementation:
 
 - whether participant liquidity has priority over a better historical price;
 - the execution price when a later snapshot touches a resting strategy order;
-- the exact passive-fill and queue-position model.
+
+The passive-fill and queue-position model is accepted in
+[ADR 0006](decisions/0006-trade-driven-passive-queue-fills.md): historical trade
+prints consume external queue ahead before same-price resting strategy orders
+fill FIFO.
 
 See [Open questions](open-questions.md).
 

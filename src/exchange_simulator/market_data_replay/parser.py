@@ -1,7 +1,7 @@
 """Pure parsing of the historical tick CSV into market-data messages.
 
-Each CSV row is a full five-level book snapshot that may also carry the most
-recent trade print (``lastPx``/``size``) and a cumulative ``volume``. This module
+Each CSV row is a full five-level post-event book snapshot that may also carry
+the most recent trade print (``lastPx``/``size``) and a cumulative ``volume``. This module
 turns a stream of rows into the two published streams:
 
 * every row yields a :class:`MarketDataSnapshot` (book only);
@@ -9,8 +9,9 @@ turns a stream of rows into the two published streams:
   trade stream is reconstructed from the volume delta rather than trusting
   ``lastPx`` (which repeats across quote-only rows).
 
-Both message types share a single monotonically increasing ``sequence``; within a
-row the snapshot is emitted before its trade print. No I/O or bus dependency here
+Both message types share a single monotonically increasing ``sequence``; when a
+row has both messages, the trade print is emitted before that row's post-event
+snapshot. No I/O or bus dependency here
 so the reconstruction logic is unit-testable in isolation.
 """
 
@@ -24,6 +25,7 @@ from exchange_simulator.schemas.market_data import (
     MarketDataSnapshot,
     MarketTradePrint,
 )
+from exchange_simulator.schemas.common import Side
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,41 @@ def _parse_levels(
     return tuple(levels)
 
 
+def _infer_aggressor_side_from_book(
+    trade_price: Decimal,
+    bids: Tuple[BookLevel, ...],
+    asks: Tuple[BookLevel, ...],
+) -> Side | None:
+    if not bids or not asks:
+        return None
+
+    best_bid = bids[0].price
+    best_ask = asks[0].price
+    if best_bid > best_ask:
+        return None
+
+    if trade_price <= best_bid:
+        return Side.SELL
+
+    if trade_price >= best_ask:
+        return Side.BUY
+
+    return None
+
+
+def _infer_aggressor_side(
+    trade_price: Decimal,
+    previous_bids: Tuple[BookLevel, ...],
+    previous_asks: Tuple[BookLevel, ...],
+    current_bids: Tuple[BookLevel, ...],
+    current_asks: Tuple[BookLevel, ...],
+) -> Side | None:
+    return (
+        _infer_aggressor_side_from_book(trade_price, previous_bids, previous_asks)
+        or _infer_aggressor_side_from_book(trade_price, current_bids, current_asks)
+    )
+
+
 def iter_messages(
     rows: Iterable[Mapping[str, str]],
     instrument_id: str,
@@ -95,11 +132,50 @@ def iter_messages(
     """
     sequence = start_sequence
     prev_volume: int | None = None
+    prev_bids: Tuple[BookLevel, ...] = ()
+    prev_asks: Tuple[BookLevel, ...] = ()
 
     for row in rows:
         timestamp = parse_timestamp(row["date"], row["time"])
         bids = _parse_levels(row, _BID_PRICE_COLS, _BID_SIZE_COLS)
         asks = _parse_levels(row, _ASK_PRICE_COLS, _ASK_SIZE_COLS)
+
+        if not _is_blank(row.get("volume")):
+            cumulative_volume = int(float(row["volume"]))
+            traded_quantity = 0
+
+            if prev_volume is None:
+                prev_volume = cumulative_volume
+                traded_quantity = cumulative_volume
+            else:
+                traded_quantity = cumulative_volume - prev_volume
+                prev_volume = cumulative_volume
+
+            if traded_quantity > 0:
+                if _is_blank(row.get("lastPx")):
+                    logger.warning(
+                        "volume advanced by %d at %s but lastPx is blank; skipping trade print",
+                        traded_quantity,
+                        timestamp,
+                    )
+                else:
+                    trade_price = Decimal(str(row["lastPx"]).strip())
+                    yield MarketTradePrint(
+                        instrument_id=instrument_id,
+                        sequence=sequence,
+                        timestamp=timestamp,
+                        price=trade_price,
+                        quantity=traded_quantity,
+                        cumulative_volume=cumulative_volume,
+                        aggressor_side=_infer_aggressor_side(
+                            trade_price,
+                            prev_bids,
+                            prev_asks,
+                            bids,
+                            asks,
+                        ),
+                    )
+                    sequence += 1
 
         yield MarketDataSnapshot(
             instrument_id=instrument_id,
@@ -109,36 +185,5 @@ def iter_messages(
             asks=asks,
         )
         sequence += 1
-
-        if _is_blank(row.get("volume")):
-            continue
-        cumulative_volume = int(float(row["volume"]))
-
-        if prev_volume is None:
-            prev_volume = cumulative_volume
-            if cumulative_volume == 0:
-                continue
-            traded_quantity = cumulative_volume
-        else:
-            traded_quantity = cumulative_volume - prev_volume
-            prev_volume = cumulative_volume
-            if traded_quantity <= 0:
-                continue
-
-        if _is_blank(row.get("lastPx")):
-            logger.warning(
-                "volume advanced by %d at %s but lastPx is blank; skipping trade print",
-                traded_quantity,
-                timestamp,
-            )
-            continue
-
-        yield MarketTradePrint(
-            instrument_id=instrument_id,
-            sequence=sequence,
-            timestamp=timestamp,
-            price=Decimal(str(row["lastPx"]).strip()),
-            quantity=traded_quantity,
-            cumulative_volume=cumulative_volume,
-        )
-        sequence += 1
+        prev_bids = bids
+        prev_asks = asks

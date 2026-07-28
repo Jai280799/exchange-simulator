@@ -14,7 +14,7 @@ from exchange_simulator.messaging.topics import RequestTopic, StateTopic, Topic,
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType
 from exchange_simulator.schemas.executions import ExecutionReport, Trade
 from exchange_simulator.schemas.instrument import Instrument
-from exchange_simulator.schemas.market_data import MarketDataSnapshot
+from exchange_simulator.schemas.market_data import MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.schemas.order import CreateOrderRequest, CancelOrderRequest, OrderResponse
 from logging_config import configure_logging
 
@@ -53,6 +53,8 @@ class MatchingEngine:
                     self._process_cancel_order_request(message)
                 case StateTopic.MARKET_DATA:
                     self._process_market_data_snapshot(message)
+                case StateTopic.MARKET_TRADES:
+                    self._process_market_trade_print(message)
                 case _:
                     raise ValueError(f"Received message on unexpected topic: {topic}. Please contact developer.")
         except Exception:
@@ -82,10 +84,7 @@ class MatchingEngine:
             creation_request_timestamp=create_order_request.timestamp
         )
 
-        if book_order.instrument_id not in self._order_book_cache:
-            self._order_book_cache[book_order.instrument_id] = OrderBook(instrument, self._market_impact_model)
-
-        order_book_result = self._order_book_cache[book_order.instrument_id].add_order(book_order)
+        order_book_result = self._get_or_create_order_book(book_order.instrument_id).add_order(book_order)
         self._order_id_cache.add(create_order_request.order_id)
         self._process_removed_order_ids(order_book_result)
 
@@ -146,12 +145,27 @@ class MatchingEngine:
 
     def _process_market_data_snapshot(self, market_data_snapshot: MarketDataSnapshot) -> None:
         _logger.debug("Received market data snapshot: %s", market_data_snapshot)
-        order_book_result = self._order_book_cache[
-            market_data_snapshot.instrument_id
-        ].on_market_data_snapshot(market_data_snapshot)
+        order_book_result = self._get_or_create_order_book(market_data_snapshot.instrument_id).on_market_data_snapshot(market_data_snapshot)
 
         self._process_removed_order_ids(order_book_result)
         self._publish_order_book_result(order_book_result)
+
+    def _process_market_trade_print(self, market_trade_print: MarketTradePrint) -> None:
+        _logger.debug("Received market trade print: %s", market_trade_print)
+        order_book_result = self._get_or_create_order_book(market_trade_print.instrument_id).on_market_trade_print(market_trade_print)
+
+        self._process_removed_order_ids(order_book_result)
+        self._publish_order_book_result(order_book_result)
+
+    def _get_or_create_order_book(self, instrument_id: str) -> OrderBook:
+        instrument = self._instruments.get(instrument_id)
+        if instrument is None:
+            raise ValueError(f"Instrument with ID {instrument_id} does not exist.")
+
+        if instrument_id not in self._order_book_cache:
+            self._order_book_cache[instrument_id] = OrderBook(instrument, self._market_impact_model)
+
+        return self._order_book_cache[instrument_id]
 
     def _process_removed_order_ids(self, order_book_result: OrderBookResult):
         for order_id in order_book_result.removed_order_ids:

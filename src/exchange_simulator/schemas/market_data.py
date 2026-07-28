@@ -15,6 +15,8 @@ from decimal import Decimal
 from typing import Tuple
 import datetime as dt
 
+from exchange_simulator.schemas.common import Side
+
 
 @dataclass(frozen=True, slots=True)
 class BookLevel:
@@ -39,3 +41,4 @@ class MarketTradePrint:
     price: Decimal
     quantity: int
     cumulative_volume: int
+    aggressor_side: Side | None
