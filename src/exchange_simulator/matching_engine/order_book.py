@@ -7,7 +7,9 @@ from uuid import uuid4
 
 from sortedcontainers import SortedDict
 
+from exchange_simulator.matching_engine.market_impact.models import MarketImpactModel
 from exchange_simulator.schemas.common import Side, OrderType
+from exchange_simulator.schemas.instrument import Instrument
 from exchange_simulator.schemas.market_data import MarketDataSnapshot
 from exchange_simulator.matching_engine import BookOrder, MutableBookLevel, OrderBookResult
 from exchange_simulator.matching_engine.utils.execution_utils import build_execution_report, build_trade
@@ -17,7 +19,9 @@ _logger = logging.getLogger(__name__)
 
 class OrderBook:
 
-    def __init__(self):
+    def __init__(self, instrument: Instrument, market_impact_model: MarketImpactModel):
+        self._instrument: Instrument = instrument
+        self._market_impact_model: MarketImpactModel = market_impact_model
         self.order_cache: Dict[str, BookOrder] = {}
         self.bid_price_level_order_cache: SortedDict[Decimal, OrderedDict[str, BookOrder]] = SortedDict()
         self.ask_price_level_order_cache: SortedDict[Decimal, OrderedDict[str, BookOrder]] = SortedDict()
@@ -76,12 +80,12 @@ class OrderBook:
 
     def _update_market_data_levels(self, market_data_snapshot: MarketDataSnapshot) -> None:
         self.market_data_bid_levels = deque(
-            MutableBookLevel(book_level.price, book_level.quantity)
-            for book_level in market_data_snapshot.bids
+            MutableBookLevel(book_level.price, book_level.quantity, index)
+            for index, book_level in enumerate(market_data_snapshot.bids)
         )
         self.market_data_ask_levels = deque(
-            MutableBookLevel(book_level.price, book_level.quantity)
-            for book_level in market_data_snapshot.asks
+            MutableBookLevel(book_level.price, book_level.quantity, index)
+            for index, book_level in enumerate(market_data_snapshot.asks)
         )
 
     def _match_incoming_order(self, order: BookOrder) -> OrderBookResult:
@@ -187,7 +191,8 @@ class OrderBook:
     def _execute_order_against_market_level(self, order: BookOrder, market_level: MutableBookLevel) -> OrderBookResult:
         result = OrderBookResult()
         trade_quantity = min(order.remaining_quantity, market_level.quantity)
-        self._add_execution_events(result, order, order.side, market_level.price, trade_quantity, order.creation_request_timestamp)
+        trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, market_level, market_level.price)
+        self._add_execution_events(result, order, order.side, trade_price, trade_quantity, order.creation_request_timestamp)
 
         order.remaining_quantity -= trade_quantity
         market_level.quantity -= trade_quantity
@@ -208,7 +213,7 @@ class OrderBook:
 
             for order_id in list(buy_orders_at_price.keys()):
                 order = buy_orders_at_price[order_id]
-                trade_price = order.price
+                trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, best_market_ask_level, order.price)
                 trade_quantity = min(order.remaining_quantity, best_market_ask_level.quantity)
                 self._add_execution_events(result, order, Side.SELL, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity
@@ -241,7 +246,7 @@ class OrderBook:
 
             for order_id in list(sell_orders_at_price.keys()):
                 order = sell_orders_at_price[order_id]
-                trade_price = order.price
+                trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, best_market_bid_level, order.price)
                 trade_quantity = min(order.remaining_quantity, best_market_bid_level.quantity)
                 self._add_execution_events(result, order, Side.BUY, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity

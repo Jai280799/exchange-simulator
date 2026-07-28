@@ -1,4 +1,20 @@
-class MessageBusError(Exception):
+class ExchangeSimulatorError(Exception):
+    pass
+
+
+class MatchingEngineError(ExchangeSimulatorError):
+    pass
+
+
+class CreateOrderRequestValidationError(MatchingEngineError):
+    pass
+
+
+class CancelOrderRequestValidationError(MatchingEngineError):
+    pass
+
+
+class MessageBusError(ExchangeSimulatorError):
     pass
 
 

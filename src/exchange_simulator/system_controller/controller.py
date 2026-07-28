@@ -2,6 +2,7 @@ import logging
 import time
 from multiprocessing import Process, Event
 
+from exchange_simulator.matching_engine.market_impact.models import MarketDepthImpactModel
 from exchange_simulator.matching_engine.matching_engine import run_matching_engine_component
 from exchange_simulator.messaging.multiprocessing_bus import MultiprocessingMessageBusTopology
 from exchange_simulator.system_controller import Component
@@ -33,7 +34,7 @@ class SystemController:
         matching_engine_process = Process(
             name=Component.MATCHING_ENGINE,
             target=run_matching_engine_component,
-            args=(matching_engine_bus, start_event, shutdown_event),
+            args=(matching_engine_bus, start_event, shutdown_event, MarketDepthImpactModel(tick_penalty_per_level=1)),
         )
 
         _logger.info("Starting components")

@@ -14,6 +14,7 @@ from exchange_simulator.system_controller.component_specs import build_matching_
 
 
 TEST_CLIENT = "test-client"
+INSTRUMENT_ID = "XHKG:2603"
 
 
 def build_test_client_component_spec() -> ComponentSpec:
@@ -53,7 +54,7 @@ def test_matching_engine_receives_create_order_request_and_publishes_response() 
     create_order_request = CreateOrderRequest(
         order_id="order-1",
         strategy_id="strategy-1",
-        instrument_id="2603",
+        instrument_id=INSTRUMENT_ID,
         side=Side.BUY,
         order_type=OrderType.LIMIT,
         quantity=100,
@@ -96,7 +97,7 @@ def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orde
     sell_order_request = CreateOrderRequest(
         order_id="sell-order",
         strategy_id="strategy-1",
-        instrument_id="2603",
+        instrument_id=INSTRUMENT_ID,
         side=Side.SELL,
         order_type=OrderType.LIMIT,
         quantity=100,
@@ -106,7 +107,7 @@ def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orde
     buy_order_request = CreateOrderRequest(
         order_id="buy-order",
         strategy_id="strategy-2",
-        instrument_id="2603",
+        instrument_id=INSTRUMENT_ID,
         side=Side.BUY,
         order_type=OrderType.LIMIT,
         quantity=100,
