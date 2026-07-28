@@ -12,7 +12,7 @@ pull requests are in flight.
 2. [Message contracts](message-contracts.md) — topics, producers, consumers,
    schemas, and routing assumptions.
 3. [Market-data interface](market-data-interface.md) — exact snapshot and trade
-   payloads, multiprocessing transport, and integration examples.
+   payloads, component message-bus transport, and integration examples.
 4. [Demo runbook](demo-runbook.md) — one-command presentation lifecycle,
    observable progress, outputs, and rehearsal checks.
 5. [Open questions](open-questions.md) — decisions that are not settled and must

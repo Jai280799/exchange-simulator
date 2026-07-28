@@ -7,7 +7,7 @@ Last updated: **2026-07-23**
 
 The simulator replays historical five-level market data, accepts strategy orders,
 matches those orders using a deterministic simulation model, and returns order
-responses and executions through a multiprocessing message bus.
+responses and executions through a component message bus.
 
 The MVP favors a coherent, demonstrable system over a fully reconstructed
 exchange. Advanced queue-position and market-impact models can be added behind
@@ -17,7 +17,7 @@ explicit interfaces after the baseline works end to end.
 
 | Area | Status | Notes |
 |---|---|---|
-| Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
+| Schemas and message bus transports | In flight | Topic permissions, type validation, component registration, and topology finalization exist. Multiprocessing and ZeroMQ topology implementations are available behind the shared bus interface. |
 | Historical market-data feed | In flight in PR #15 | Streams five-level snapshots and historical trade prints for one instrument. |
 | Matching engine and order book | In flight in PR #14 | Initial architecture; behavioral rules and integration contracts are still being reviewed. |
 | System controller | Partial in PR #14 | Matching-engine-only wiring exists; full lifecycle and all components are not integrated. |
@@ -167,14 +167,14 @@ See [Open questions](open-questions.md).
    stable topic/schema contracts.
 2. Create a dedicated central topology module containing all component specs.
 3. Add the trading platform as the only order-request gateway.
-4. Wire the feed, engine, and platform through the real multiprocessing bus.
+4. Wire the feed, engine, and platform through the real component message bus.
 5. Add coordinated startup, readiness, failure detection, end-of-stream, and
    shutdown behavior.
 6. Add run configuration, progress reporting, and durable result writers.
 7. Add one end-to-end fixture through the presentation entry point: replay a
    small day fragment, submit an order, observe the response/execution, and
    terminate every process.
-8. Rehearse a full presentation-duration run with the documented demo
+8. Select the presentation transport configuration and rehearse a full presentation-duration run with the documented demo
    configuration.
 9. Add multi-instrument orchestration and advanced matching models only after the
    baseline flow is stable.

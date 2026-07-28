@@ -13,7 +13,7 @@ from exchange_simulator.messaging.exceptions import (
     TopicPermissionError,
     UnknownComponentError,
 )
-from exchange_simulator.messaging.message_bus import ComponentMessageBus
+from exchange_simulator.messaging.message_bus import ComponentMessageBus, MessageBusTopology
 from exchange_simulator.messaging.message_types import MESSAGE_TYPES
 from exchange_simulator.messaging.topics import Topic
 
@@ -74,7 +74,7 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
         raise MessageTypeError(f"Topic {topic!s} expects {expected_type.__name__}, got {type(message).__name__}")
 
 
-class MultiprocessingMessageBusTopology:
+class MultiprocessingMessageBusTopology(MessageBusTopology):
     def __init__(
         self,
         message_types: Optional[Dict[Topic, Type[Any]]] = None,

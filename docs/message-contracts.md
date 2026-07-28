@@ -11,6 +11,8 @@ Last updated: **2026-07-23**
 - Request and response topics are directional and must not be interchanged.
 - Historical market events and simulated exchange events retain distinct
   provenance.
+- Component behavior depends on `ComponentMessageBus`, not a specific transport;
+  topology construction selects multiprocessing or ZeroMQ.
 
 For the exact market-data dataclasses, ordering guarantees, bus behavior,
 consumer loop, and dummy-publisher example, see the

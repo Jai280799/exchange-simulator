@@ -1,6 +1,6 @@
 # Market-data interface
 
-- Status: **Payload and multiprocessing transport implemented on `master`**
+- Status: **Payload and component message-bus transport implemented on `master`**
 - Last updated: **2026-07-24**
 
 This document is the integration contract between the historical market-data
@@ -16,9 +16,9 @@ The feed publishes two distinct event streams:
 | `StateTopic.MARKET_DATA` | `MarketDataSnapshot` | Historical five-level order-book snapshot |
 | `StateTopic.MARKET_TRADES` | `MarketTradePrint` | Historical trade reconstructed from the source data |
 
-These are Python dataclass instances transported through the multiprocessing
-message bus. They are not JSON dictionaries and consumers should not implement
-a separate JSON parser for the current application.
+These are Python dataclass instances transported through the component message
+bus. They are not JSON dictionaries and consumers should not implement a
+separate JSON parser for the current application.
 
 Simulated trades produced by the matching engine use `StateTopic.TRADES` and
 must not be published on either historical topic.
@@ -125,22 +125,24 @@ The sequence is the authoritative way to merge the two historical streams.
 There is no global sequence across different feed instances or simulated
 matching-engine events.
 
-## Multiprocessing transport
+## Component message-bus transport
 
 Each component declares its subscriptions and publications using
 `ComponentSpec`. The system controller registers all specs, finalizes the
 topology, and then creates a component-specific bus.
 
-The bus:
+The component-facing bus:
 
-- uses `multiprocessing.Queue`;
+- hides the selected transport behind `ComponentMessageBus`;
 - fans a published event out to every component subscribed to its topic;
 - validates that the payload type matches the topic;
 - delivers all of one component's subscribed topics through one inbox;
 - returns `(topic, payload)` from `receive(timeout=...)`.
 
-The current transport is local multiprocessing. It is not HTTP, WebSocket,
-Kafka, or a network protocol.
+The component-facing interface is transport-neutral. Local multiprocessing queues
+and a local ZeroMQ broker are available behind `ComponentMessageBus`. Component
+business logic should not depend on queues, sockets, endpoints, or broker
+processes directly. It is not HTTP, WebSocket, or Kafka.
 
 ### Consumer declaration
 
@@ -236,7 +238,7 @@ Already implemented:
 - topic names and topic-to-schema validation;
 - best-first book ordering;
 - shared historical sequence semantics;
-- publish/subscribe fan-out through multiprocessing queues.
+- publish/subscribe fan-out through component message-bus transports.
 
 Still open or incomplete:
 
@@ -272,4 +274,4 @@ preserve decimal precision by encoding prices as strings:
 ```
 
 Any JSON format must be documented as a separate boundary contract rather than
-silently replacing the multiprocessing payload.
+silently replacing the component message-bus payload.

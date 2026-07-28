@@ -4,6 +4,8 @@ import time
 
 import zmq
 
+from logging_config import configure_logging
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PUB_ENDPOINT = "tcp://127.0.0.1:5555"
@@ -15,6 +17,7 @@ def run_zeromq_broker(
     pub_endpoint: str = DEFAULT_PUB_ENDPOINT,
     sub_endpoint: str = DEFAULT_SUB_ENDPOINT,
 ) -> None:
+    configure_logging()
     context = zmq.Context.instance()
 
     frontend = context.socket(zmq.XSUB)

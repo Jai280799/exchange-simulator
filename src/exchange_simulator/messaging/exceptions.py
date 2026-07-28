@@ -24,3 +24,7 @@ class TopicPermissionError(MessageBusError):
 
 class MessageTypeError(MessageBusError):
     pass
+
+
+class UnknownTopicError(MessageBusError):
+    pass

@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
 import logging
+import multiprocessing
+import socket
 import time
-from typing import Any, Dict, FrozenSet, Optional, Tuple, Type
+from queue import Empty
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Type
 
 import zmq
 
@@ -9,15 +12,21 @@ from exchange_simulator.messaging.component_spec import ComponentSpec
 from exchange_simulator.messaging.exceptions import (
     DuplicateComponentError,
     MessageTypeError,
+    TopologyAlreadyFinalizedError,
+    TopologyNotFinalizedError,
     TopicPermissionError,
     UnknownComponentError,
     UnknownTopicError,
 )
-from exchange_simulator.messaging.message_bus import ComponentMessageBus
+from exchange_simulator.messaging.message_bus import ComponentMessageBus, MessageBusTopology
 from exchange_simulator.messaging.message_types import MESSAGE_TYPES
 from exchange_simulator.messaging.serialization import deserialize_message, serialize_message
 from exchange_simulator.messaging.topics import RequestTopic, ResponseTopic, StateTopic, Topic
-from exchange_simulator.messaging.zeromq_broker import DEFAULT_PUB_ENDPOINT, DEFAULT_SUB_ENDPOINT
+from exchange_simulator.messaging.zeromq_broker import (
+    DEFAULT_PUB_ENDPOINT,
+    DEFAULT_SUB_ENDPOINT,
+    start_broker_process,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +85,7 @@ class ZeroMQComponentMessageBus(ComponentMessageBus):
         try:
             topic_bytes, payload_bytes = self._sub_socket.recv_multipart()
         except zmq.Again:
-            raise TimeoutError(f"Component {self.component_name!r} timed out waiting for a message")
+            raise Empty
 
         topic = self._parse_topic(topic_bytes)
         message = deserialize_message(payload_bytes)
@@ -119,21 +128,45 @@ class ZeroMQComponentMessageBus(ComponentMessageBus):
         raise MessageTypeError(f"Topic {topic.value!s} expects {expected_type.__name__}, got {type(message).__name__}")
 
 
-class ZeroMQMessageBusTopology:
+class ZeroMQMessageBusTopology(MessageBusTopology):
     def __init__(
         self,
         pub_endpoint: str = DEFAULT_PUB_ENDPOINT,
         sub_endpoint: str = DEFAULT_SUB_ENDPOINT,
+        start_broker: bool = True,
         message_types: Optional[Dict[Topic, Type[Any]]] = None,
         validate_message_types: bool = True,
     ) -> None:
         self._pub_endpoint = pub_endpoint
         self._sub_endpoint = sub_endpoint
+        self._start_broker = start_broker
         self._message_types = MESSAGE_TYPES if message_types is None else message_types
         self._validate_message_types = validate_message_types
         self._component_specs: Dict[str, ComponentSpec] = {}
+        self._created_buses: List[ZeroMQComponentMessageBus] = []
+        self._broker_process: Optional[multiprocessing.Process] = None
+        self._finalized = False
+
+    @classmethod
+    def with_random_local_endpoints(
+        cls,
+        *,
+        start_broker: bool = True,
+        message_types: Optional[Dict[Topic, Type[Any]]] = None,
+        validate_message_types: bool = True,
+    ) -> "ZeroMQMessageBusTopology":
+        return cls(
+            pub_endpoint=_get_available_tcp_endpoint(),
+            sub_endpoint=_get_available_tcp_endpoint(),
+            start_broker=start_broker,
+            message_types=message_types,
+            validate_message_types=validate_message_types,
+        )
 
     def register_component(self, spec: ComponentSpec) -> None:
+        if self._finalized:
+            raise TopologyAlreadyFinalizedError("Cannot register component after topology is finalized")
+
         if spec.name in self._component_specs:
             logger.error("Duplicate ZeroMQ messaging component registration: %s", spec.name)
             raise DuplicateComponentError(f"Component {spec.name!r} is already registered")
@@ -146,13 +179,26 @@ class ZeroMQMessageBusTopology:
             len(spec.published_topics),
         )
 
+    def finalize(self) -> None:
+        if self._finalized:
+            return
+
+        if self._start_broker:
+            self._broker_process = start_broker_process(self._pub_endpoint, self._sub_endpoint)
+
+        logger.info("Finalized ZeroMQ messaging topology")
+        self._finalized = True
+
     def create_component_bus(self, component_name: str) -> ZeroMQComponentMessageBus:
+        if not self._finalized:
+            raise TopologyNotFinalizedError("Cannot create component bus before topology is finalized")
+
         spec = self._component_specs.get(component_name)
         if spec is None:
             logger.error("Unknown ZeroMQ messaging component requested: %s", component_name)
             raise UnknownComponentError(f"Component {component_name!r} is not registered")
 
-        return ZeroMQComponentMessageBus(
+        bus = ZeroMQComponentMessageBus(
             component_name=component_name,
             subscribed_topics=spec.subscribed_topics,
             published_topics=spec.published_topics,
@@ -161,3 +207,23 @@ class ZeroMQMessageBusTopology:
             sub_endpoint=self._sub_endpoint,
             validate_message_types=self._validate_message_types,
         )
+        self._created_buses.append(bus)
+        return bus
+
+    def close(self) -> None:
+        for bus in self._created_buses:
+            bus.close()
+        self._created_buses.clear()
+
+        if self._broker_process is not None:
+            self._broker_process.terminate()
+            self._broker_process.join(timeout=2)
+            self._broker_process = None
+        self._finalized = False
+
+
+def _get_available_tcp_endpoint() -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        _, port = sock.getsockname()
+    return f"tcp://127.0.0.1:{port}"

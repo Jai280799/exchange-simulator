@@ -7,6 +7,7 @@ from exchange_simulator.matching_engine.matching_engine import run_matching_engi
 from exchange_simulator.messaging.component_spec import ComponentSpec
 from exchange_simulator.messaging.multiprocessing_bus import MultiprocessingMessageBusTopology
 from exchange_simulator.messaging.topics import RequestTopic, ResponseTopic, StateTopic
+from exchange_simulator.messaging.zeromq_bus import ZeroMQMessageBusTopology
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType, Side
 from exchange_simulator.schemas.order import CreateOrderRequest
 from exchange_simulator.system_controller import Component
@@ -74,7 +75,7 @@ def test_matching_engine_receives_create_order_request_and_publishes_response() 
 
 
 def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orders() -> None:
-    topology = MultiprocessingMessageBusTopology()
+    topology = ZeroMQMessageBusTopology.with_random_local_endpoints()
     topology.register_component(build_matching_engine_component_spec())
     topology.register_component(build_test_client_component_spec())
     topology.finalize()
@@ -127,6 +128,7 @@ def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orde
     finally:
         shutdown_event.set()
         matching_engine_thread.join(timeout=2)
+        topology.close()
 
     assert sell_response_topic == ResponseTopic.CREATE_ORDER
     assert sell_response.order_id == sell_order_request.order_id
