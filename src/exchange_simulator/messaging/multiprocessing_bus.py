@@ -17,7 +17,7 @@ from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.message_types import MESSAGE_TYPES
 from exchange_simulator.messaging.topics import Topic
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +37,7 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
         self._validate_message_type(topic, message)
 
         subscriber_queues = self.output_queues.get(topic, ())
-        logger.debug(
+        _logger.debug(
             "Component %s publishing %s to topic %s for %d subscriber(s)",
             self.component_name,
             type(message).__name__,
@@ -55,7 +55,7 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
             topic, message = self.input_queue.get(timeout=timeout)
 
         self._validate_message_type(topic, message)
-        logger.debug(
+        _logger.debug(
             "Component %s received %s from topic %s",
             self.component_name,
             type(message).__name__,
@@ -100,7 +100,7 @@ class MultiprocessingMessageBusTopology:
 
         self._component_specs[spec.name] = spec
         self._component_inboxes[spec.name] = input_queue
-        logger.info(
+        _logger.info(
             "Registered messaging component %s with %d subscription(s) and %d publication(s)",
             spec.name,
             len(spec.subscribed_topics),
@@ -108,6 +108,7 @@ class MultiprocessingMessageBusTopology:
         )
 
     def finalize(self) -> None:
+        _logger.info("Finalizing messaging topology")
         self._finalized = True
 
     def create_component_bus(self, component_name: str) -> MultiprocessingComponentMessageBus:
