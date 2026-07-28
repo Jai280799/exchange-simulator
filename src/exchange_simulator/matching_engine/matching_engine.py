@@ -13,7 +13,7 @@ from exchange_simulator.schemas.common import OrderResponseStatus, OrderType
 from exchange_simulator.schemas.executions import ExecutionReport, Trade
 from exchange_simulator.schemas.market_data import MarketDataSnapshot
 from exchange_simulator.schemas.order import CreateOrderRequest, CancelOrderRequest, OrderResponse
-from logging_config import configure_logging
+from exchange_simulator.logging_config import configure_logging
 
 _logger = logging.getLogger(__name__)
 

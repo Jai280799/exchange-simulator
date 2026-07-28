@@ -1,7 +1,7 @@
 import logging
 
 from exchange_simulator.system_controller.controller import SystemController
-from logging_config import configure_logging
+from exchange_simulator.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
