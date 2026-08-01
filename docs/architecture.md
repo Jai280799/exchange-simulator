@@ -1,7 +1,7 @@
 # Exchange simulator architecture
 
-Status: **Accepted baseline with in-flight components**
-Last updated: **2026-07-23**
+Status: **Accepted baseline with incomplete integration**
+Last updated: **2026-08-01**
 
 ## Purpose
 
@@ -18,9 +18,10 @@ explicit interfaces after the baseline works end to end.
 | Area | Status | Notes |
 |---|---|---|
 | Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
-| Historical market-data feed | In flight in PR #15 | Streams five-level snapshots and historical trade prints for one instrument. |
-| Matching engine and order book | In flight in PR #14 | Initial architecture; behavioral rules and integration contracts are still being reviewed. |
-| System controller | Partial in PR #14 | Matching-engine-only wiring exists; full lifecycle and all components are not integrated. |
+| Historical market-data feed | On `master` | Streams five-level snapshots and historical trade prints for one instrument. |
+| Matching engine and order book | On `master` | Initial architecture is merged; some behavioral policies remain open. |
+| System controller | Partial on `master` | Matching-engine and in-flight recorder wiring exist; the feed and other components are not yet integrated. |
+| Run recorder | In flight in PR #22 | Records order state, simulated trades, and execution reports as CSV artifacts; complete run orchestration remains integration work. |
 | Trading platform and strategy | Not integrated | Their request, response, and execution-routing responsibilities must follow the contracts below. |
 
 ## Target component flow
@@ -32,11 +33,13 @@ flowchart LR
     ENGINE[Matching engine<br/>strategy book + market snapshot]
     PLATFORM[Trading platform<br/>trusted strategy gateway]
     STRATEGY[Strategy]
+    RECORDER[Run recorder<br/>durable CSV artifacts]
 
     SC -. starts/stops .-> FEED
     SC -. starts/stops .-> ENGINE
     SC -. starts/stops .-> PLATFORM
     SC -. starts/stops .-> STRATEGY
+    SC -. starts/stops .-> RECORDER
 
     FEED -- MARKET_DATA<br/>historical snapshots --> ENGINE
     FEED -- MARKET_DATA / MARKET_TRADES<br/>market observations --> PLATFORM
@@ -45,6 +48,8 @@ flowchart LR
     ENGINE -- create/cancel responses --> PLATFORM
     ENGINE -- TRADES<br/>simulated public trades --> PLATFORM
     ENGINE -- EXECUTION_REPORT<br/>private execution result --> PLATFORM
+    ENGINE -- TRADES / EXECUTION_REPORT --> RECORDER
+    PLATFORM -. ORDERS<br/>producer decision open .-> RECORDER
     PLATFORM -- acknowledgements / fills --> STRATEGY
 ```
 
@@ -99,6 +104,20 @@ here remains an explicit open contract question.
 - Consume market observations and its own order/execution state.
 - Avoid direct access to matching-engine internals.
 
+### Run recorder
+
+- Act as a trusted internal consumer of order state, simulated trades, and
+  execution reports.
+- Write each supported topic to a separate CSV artifact without merging
+  historical and simulated trade provenance.
+- Flush each row as it is written and, after shutdown is requested, continue
+  consuming until the recorder inbox has been quiet for one receive timeout.
+- Leave run identifiers, output-root configuration, producer shutdown ordering,
+  and final summaries to the system controller.
+
+The producer and ownership contract for `ORDERS` remains open. Until a component
+publishes that topic, the recorder cannot produce `orders.csv`.
+
 ## Accepted invariants
 
 1. **Historical data is immutable ground truth.** Simulated activity does not
@@ -128,8 +147,8 @@ architecture.
 
 The target runtime must:
 
-- start the message bus, historical feed, matching engine, trading platform, and
-  strategy from one command;
+- start the message bus, historical feed, matching engine, trading platform,
+  strategy, and run recorder from one command;
 - hold replay behind a readiness barrier until every required consumer is ready;
 - support a configurable replay pace suitable for a presentation-length run;
 - report periodic progress and component health;
@@ -153,7 +172,7 @@ historical snapshots. This keeps replay deterministic and aligns with the team's
 decision to prioritize a reliable demo.
 
 The following details are not yet accepted and must not be inferred from the
-current PR #14 implementation:
+merged matching-engine implementation:
 
 - whether participant liquidity has priority over a better historical price;
 - the execution price when a later snapshot touches a resting strategy order;
@@ -163,8 +182,8 @@ See [Open questions](open-questions.md).
 
 ## Integration sequence
 
-1. Merge the historical-feed foundation and matching-engine architecture with
-   stable topic/schema contracts.
+1. Keep the merged historical-feed and matching-engine foundations aligned with
+   their stable topic/schema contracts.
 2. Create a dedicated central topology module containing all component specs.
 3. Add the trading platform as the only order-request gateway.
 4. Wire the feed, engine, and platform through the real multiprocessing bus.

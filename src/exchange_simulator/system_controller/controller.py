@@ -1,3 +1,4 @@
+import datetime as dt
 import logging
 import time
 from multiprocessing import Process, Event
@@ -19,6 +20,9 @@ class SystemController:
 
     def run(self) -> None:
         _logger.info("Starting the system controller...")
+        run_id = dt.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        output_dir = PROJECT_ROOT / "runs" / run_id
+        _logger.info("Writing run artifacts to %s", output_dir)
         topology = MultiprocessingMessageBusTopology()
 
         # Register component specs
@@ -46,7 +50,7 @@ class SystemController:
         run_recorder_process = Process(
             name=Component.RUN_RECORDER,
             target=run_recording_component,
-            args=(run_recorder_bus, start_event, shutdown_event, PROJECT_ROOT / "data" / "output"),
+            args=(run_recorder_bus, start_event, shutdown_event, output_dir),
         )
 
         _logger.info("Starting components")

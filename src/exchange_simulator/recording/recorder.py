@@ -14,6 +14,8 @@ _logger = logging.getLogger(__name__)
 
 class RunRecorder:
 
+    RECEIVE_TIMEOUT_SECONDS = 0.5
+
     def __init__(self, bus: ComponentMessageBus):
         self._bus: ComponentMessageBus = bus
         self._sink_map: Dict[SinkType, Sink] = {}
@@ -26,10 +28,14 @@ class RunRecorder:
         start_event.wait()
 
         try:
-            while not shutdown_event.is_set():
+            while True:
                 try:
-                    topic, message = self._bus.receive(timeout=0.5)
+                    topic, message = self._bus.receive(
+                        timeout=self.RECEIVE_TIMEOUT_SECONDS,
+                    )
                 except Empty:
+                    if shutdown_event.is_set():
+                        break
                     continue
 
                 for sink_type in RECORDING_CONFIG.get(topic, []):
