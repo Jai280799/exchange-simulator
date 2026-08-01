@@ -18,3 +18,14 @@ def build_matching_engine_component_spec() -> ComponentSpec:
             StateTopic.EXECUTION_REPORT,
         ],
     )
+
+
+def build_run_recorder_component_spec() -> ComponentSpec:
+    return ComponentSpec.create(
+        name=Component.RUN_RECORDER,
+        subscribed_topics=[
+            StateTopic.ORDERS,
+            StateTopic.TRADES,
+            StateTopic.EXECUTION_REPORT
+        ]
+    )
