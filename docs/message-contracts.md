@@ -90,6 +90,15 @@ Current contract:
 
 Limit orders require a price and all quantities must be positive.
 
+The MVP uses the source feedcodes `2603` and `2330` as canonical
+`instrument_id` values across market-data messages, order requests, instrument
+configuration, and matching-engine books. `config/instruments.yaml` supplies the
+MIC, currency, tick size, and lot size for each ID. Request quantities must be a
+multiple of the configured lot size, and any supplied price must be a multiple
+of the configured tick size. An optional impact model may reject an otherwise
+visible market level when its adjusted execution price would violate the order's
+limit; the default MVP runtime remains no-impact.
+
 ### `CancelOrderRequest`
 
 `master` includes `order_id`, `strategy_id`, `instrument_id`, and `timestamp`.

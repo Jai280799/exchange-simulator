@@ -15,13 +15,14 @@ from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.multiprocessing_bus import MultiprocessingMessageBusTopology
 from exchange_simulator.messaging.topics import RequestTopic, ResponseTopic, StateTopic, Topic
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType, Side
+from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
 from exchange_simulator.schemas.order import CreateOrderRequest, OrderResponse
 from exchange_simulator.system_controller import Component
 from exchange_simulator.system_controller.component_specs import build_matching_engine_component_spec
 
 
 TEST_CLIENT = "test-client"
-INSTRUMENT_ID = "XHKG:2603"
+INSTRUMENT_ID = "2603"
 ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 30)
 
 
@@ -117,6 +118,21 @@ def test_matching_engine_receives_create_order_request_and_publishes_response() 
     assert response.response_status == OrderResponseStatus.ACCEPTED
 
 
+def test_matching_engine_accepts_market_data_before_first_order(matching_engine: MatchingEngine) -> None:
+    snapshot = MarketDataSnapshot(
+        instrument_id=INSTRUMENT_ID,
+        sequence=0,
+        timestamp=ORDER_TIMESTAMP,
+        bids=(BookLevel(Decimal("99.99"), 100),),
+        asks=(BookLevel(Decimal("100.01"), 100),),
+    )
+
+    matching_engine._process_market_data_snapshot(snapshot)
+
+    assert INSTRUMENT_ID in matching_engine._order_book_cache
+    assert matching_engine._order_book_cache[INSTRUMENT_ID].market_data_bid_levels[0].price == Decimal("99.99")
+
+
 def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orders() -> None:
     topology = MultiprocessingMessageBusTopology()
     topology.register_component(build_matching_engine_component_spec())
@@ -196,8 +212,8 @@ def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orde
     ("create_order_request", "expected_message"),
     [
         (
-            build_create_order_request(instrument_id="XHKG:UNKNOWN"),
-            "Instrument with ID XHKG:UNKNOWN does not exist.",
+            build_create_order_request(instrument_id="UNKNOWN"),
+            "Instrument with ID UNKNOWN does not exist.",
         ),
         (
             build_create_order_request(price=None),
