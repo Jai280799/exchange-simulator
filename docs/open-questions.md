@@ -12,7 +12,7 @@ request does not settle them.
 |---|---|---|---|---|
 | 1 | How is the best executable price selected across strategy and historical liquidity? | Determines the matching abstraction and whether participant-first execution may give a worse price. | Jai + team | Final matching behavior |
 | 2 | Where are cancellation ownership and execution-report routing enforced? | Defines the platform/engine trust boundary and public schemas Alex builds against. | Alex + Jai | Platform integration |
-| 3 | What price fills a resting strategy order when a later snapshot touches/crosses it? | Changes P&L and passive-fill realism. | Jai + team | Passive-fill tests |
+| 3 | How should passive queue fills work? | Resolved by ADR 0006: historical trade prints consume queue ahead before same-price FIFO fills. | Jai + team | Done |
 | 4 | How is end-of-stream and shutdown coordinated? | Clean shutdown is required, but the mechanism remains open. | Integration owner | Demo entry point |
 | 5 | What replay pace and dataset should the demo use? | The system must stay observable throughout the presentation without overwhelming consumers. | Hyungmin + team | Full demo rehearsal |
 | 6 | How are multiple instruments scheduled? | Determines whether feeds run independently or merge onto one event timeline. | Hyungmin | Multi-instrument milestone |
@@ -55,6 +55,8 @@ platform's order-to-strategy mapping.
 
 ## Q3: resting-order fill price
 
+Status: **Accepted in [ADR 0006](decisions/0006-trade-driven-passive-queue-fills.md)**
+
 Under the snapshot-touch approximation, a bid resting at 100 may be crossed by a
 later historical ask of 99.
 
@@ -64,8 +66,10 @@ Options:
 2. Fill at the snapshot price, 99, granting price improvement.
 3. Do not infer a fill from a snapshot alone; require a historical trade print.
 
-The current two-book MVP can choose option 1 or 2. Option 3 belongs to a
-trade-driven passive-fill model and requires additional queue assumptions.
+The selected policy is option 3 for same-price passive queue fills: historical
+trade prints advance queue position before strategy orders fill FIFO. Crossed
+snapshot behavior remains part of the two-book approximation for marketable
+historical liquidity.
 
 ## Q4: completion and shutdown coordination
 

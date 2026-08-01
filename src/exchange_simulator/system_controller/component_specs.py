@@ -10,6 +10,7 @@ def build_matching_engine_component_spec() -> ComponentSpec:
             RequestTopic.CREATE_ORDER,
             RequestTopic.CANCEL_ORDER,
             StateTopic.MARKET_DATA,
+            StateTopic.MARKET_TRADES,
         ],
         published_topics=[
             ResponseTopic.CREATE_ORDER,

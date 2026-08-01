@@ -88,6 +88,7 @@ class MarketTradePrint:
     price: Decimal
     quantity: int
     cumulative_volume: int
+    aggressor_side: Side | None
 ```
 
 Example:
@@ -100,30 +101,41 @@ MarketTradePrint(
     price=Decimal("100.10"),
     quantity=200,
     cumulative_volume=15_200,
+    aggressor_side=Side.BUY,
 )
 ```
 
 A trade print is emitted when cumulative source volume increases. `quantity` is
 the positive volume delta and `cumulative_volume` is the source value after that
 change. A repeated `lastPx` without a volume increase does not create a trade.
+`aggressor_side` is inferred from the previous book first, then the current row's
+book. `Side.SELL` means the print likely consumed bid liquidity; `Side.BUY`
+means it likely consumed ask liquidity; `None` means the trade price could not be
+classified conservatively.
 
 ## Ordering
 
 One feed instance assigns a unique monotonically increasing `sequence` across
 both historical topics. If a source row produces both messages, its
-`MarketDataSnapshot` is published first and its `MarketTradePrint` second.
+`MarketTradePrint` is published first and its `MarketDataSnapshot` second because
+the source row's book represents the post-event book state.
 
 For example:
 
 ```text
-sequence 42: MARKET_DATA
-sequence 43: MARKET_TRADES
+sequence 42: MARKET_TRADES
+sequence 43: MARKET_DATA
 sequence 44: MARKET_DATA
 ```
 
 The sequence is the authoritative way to merge the two historical streams.
 There is no global sequence across different feed instances or simulated
 matching-engine events.
+
+Replay pacing must be applied at source-row boundaries, before the first message
+from the next row. Consumers and replay code must not infer a row boundary solely
+from the message class: a row with a trade begins with `MarketTradePrint`, while
+a row without one begins with `MarketDataSnapshot`.
 
 ## Multiprocessing transport
 
