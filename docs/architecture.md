@@ -156,6 +156,11 @@ The model deliberately ignores feedback from simulated trades into future
 historical snapshots. This keeps replay deterministic and aligns with the team's
 decision to prioritize a reliable demo.
 
+The matching implementation exposes an optional market-depth impact model for
+experiments. The application controller continues to select `NoImpactModel` for
+the MVP. Every model must honor a limit order's price; if an adjusted market
+price would be worse than the limit, that level is not executable.
+
 The following details are not yet accepted and must not be inferred from the
 current PR #14 implementation:
 

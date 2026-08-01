@@ -3,9 +3,9 @@
 Book snapshots and trade prints are two separate streams. Consumers merge them
 using ``sequence``, a single monotonically increasing counter shared across both
 streams: every message carries a unique value, so ordering by ``sequence`` yields
-the exact interleaving. The book state a trade printed against is the latest
-``MarketDataSnapshot`` with a smaller ``sequence``. Within one source row the book
-snapshot is emitted before its trade print.
+the exact interleaving. Within one source row the trade print is emitted before
+the row's post-event ``MarketDataSnapshot``. The latest snapshot with a smaller
+``sequence`` therefore represents the pre-event state used for queue turnover.
 
 ``bids`` and ``asks`` are ordered best-first: index 0 is the top of book.
 """

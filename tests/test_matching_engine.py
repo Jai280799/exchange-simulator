@@ -1,6 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 from multiprocessing import Event
+from queue import Empty
 from threading import Thread
 from typing import Any
 
@@ -15,13 +16,14 @@ from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.multiprocessing_bus import MultiprocessingMessageBusTopology
 from exchange_simulator.messaging.topics import RequestTopic, ResponseTopic, StateTopic, Topic
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType, Side
+from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.schemas.order import CreateOrderRequest, OrderResponse
 from exchange_simulator.system_controller import Component
 from exchange_simulator.system_controller.component_specs import build_matching_engine_component_spec
 
 
 TEST_CLIENT = "test-client"
-INSTRUMENT_ID = "XHKG:2603"
+INSTRUMENT_ID = "2603"
 ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 30)
 
 
@@ -48,6 +50,8 @@ def build_test_client_component_spec() -> ComponentSpec:
         ],
         published_topics=[
             RequestTopic.CREATE_ORDER,
+            StateTopic.MARKET_DATA,
+            StateTopic.MARKET_TRADES,
         ],
     )
 
@@ -121,6 +125,68 @@ def test_matching_engine_component_subscribes_to_historical_trade_prints() -> No
     spec = build_matching_engine_component_spec()
 
     assert StateTopic.MARKET_TRADES in spec.subscribed_topics
+
+
+def test_historical_trade_consumes_external_queue_before_strategy_fill() -> None:
+    topology = MultiprocessingMessageBusTopology()
+    topology.register_component(build_matching_engine_component_spec())
+    topology.register_component(build_test_client_component_spec())
+    topology.finalize()
+
+    matching_engine_bus = topology.create_component_bus(Component.MATCHING_ENGINE)
+    test_client_bus = topology.create_component_bus(TEST_CLIENT)
+    start_event = Event()
+    shutdown_event = Event()
+    matching_engine_thread = Thread(
+        target=run_matching_engine_component,
+        args=(matching_engine_bus, start_event, shutdown_event),
+        daemon=True,
+    )
+    timestamp = ORDER_TIMESTAMP
+
+    matching_engine_thread.start()
+    start_event.set()
+
+    try:
+        test_client_bus.publish(
+            StateTopic.MARKET_DATA,
+            MarketDataSnapshot(
+                instrument_id=INSTRUMENT_ID,
+                sequence=0,
+                timestamp=timestamp,
+                bids=(BookLevel(Decimal("100"), 100),),
+                asks=(BookLevel(Decimal("101"), 100),),
+            ),
+        )
+        response = publish_create_order_request(
+            test_client_bus,
+            build_create_order_request(order_id="resting-buy", price=Decimal("100")),
+        )
+        assert response.response_status == OrderResponseStatus.ACCEPTED
+
+        test_client_bus.publish(
+            StateTopic.MARKET_TRADES,
+            MarketTradePrint(INSTRUMENT_ID, 1, timestamp, Decimal("100"), 80, 80, Side.SELL),
+        )
+        with pytest.raises(Empty):
+            test_client_bus.receive(timeout=0.1)
+
+        test_client_bus.publish(
+            StateTopic.MARKET_TRADES,
+            MarketTradePrint(INSTRUMENT_ID, 2, timestamp, Decimal("100"), 30, 110, Side.SELL),
+        )
+        trade_topic, trade = test_client_bus.receive(timeout=1)
+        report_topic, report = test_client_bus.receive(timeout=1)
+    finally:
+        shutdown_event.set()
+        matching_engine_thread.join(timeout=2)
+
+    assert trade_topic == StateTopic.TRADES
+    assert trade.quantity == 10
+    assert trade.price == Decimal("100")
+    assert report_topic == StateTopic.EXECUTION_REPORT
+    assert report.order_id == "resting-buy"
+    assert report.quantity == 10
 
 
 def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orders() -> None:
@@ -202,8 +268,8 @@ def test_matching_engine_publishes_trade_and_execution_reports_for_matching_orde
     ("create_order_request", "expected_message"),
     [
         (
-            build_create_order_request(instrument_id="XHKG:UNKNOWN"),
-            "Instrument with ID XHKG:UNKNOWN does not exist.",
+            build_create_order_request(instrument_id="UNKNOWN"),
+            "Instrument with ID UNKNOWN does not exist.",
         ),
         (
             build_create_order_request(price=None),

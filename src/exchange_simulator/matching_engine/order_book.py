@@ -35,6 +35,7 @@ class OrderBook:
         self.external_queue_ahead: Dict[Side, Dict[Decimal, int]] = {Side.BUY: {}, Side.SELL: {}}
         self._last_raw_bid_quantities: Dict[Decimal, int] = {}
         self._last_raw_ask_quantities: Dict[Decimal, int] = {}
+        self._has_market_snapshot = False
 
     def add_order(self, order: BookOrder) -> OrderBookResult:
         result = self._match_incoming_order(order)
@@ -86,9 +87,14 @@ class OrderBook:
 
     def on_market_data_snapshot(self, market_data_snapshot: MarketDataSnapshot) -> OrderBookResult:
         result = OrderBookResult()
+        is_first_snapshot = not self._has_market_snapshot
         self._update_market_data_levels(market_data_snapshot)
         self._last_raw_bid_quantities = {level.price: level.quantity for level in market_data_snapshot.bids}
         self._last_raw_ask_quantities = {level.price: level.quantity for level in market_data_snapshot.asks}
+        self._has_market_snapshot = True
+
+        if is_first_snapshot:
+            self._seed_existing_orders_from_first_snapshot()
 
         result.extend(self._match_resting_buy_orders_against_market_asks(market_data_snapshot.timestamp))
         result.extend(self._match_resting_sell_orders_against_market_bids(market_data_snapshot.timestamp))
@@ -145,6 +151,12 @@ class OrderBook:
         raw_quantities = self._last_raw_bid_quantities if side == Side.BUY else self._last_raw_ask_quantities
         return raw_quantities.get(price, 0)
 
+    def _seed_existing_orders_from_first_snapshot(self) -> None:
+        for side, price_level_cache in self.price_level_cache_getter.items():
+            for price in price_level_cache:
+                self.external_queue_ahead[side][price] = self._raw_market_quantity_at_price(side, price)
+                self._sync_queue_ahead(side, price)
+
     def _sync_queue_ahead(self, side: Side, price: Decimal) -> None:
         orders_at_price = self.price_level_cache_getter[side].get(price)
         if not orders_at_price:
@@ -186,7 +198,8 @@ class OrderBook:
                 _, opp_orders_at_price = internal_match
                 result.extend(self._execute_order(order, opp_orders_at_price))
             elif market_match is not None:
-                result.extend(self._execute_order_against_market_level(order, market_match))
+                market_level, trade_price = market_match
+                result.extend(self._execute_order_against_market_level(order, market_level, trade_price))
 
         return result
 
@@ -201,15 +214,25 @@ class OrderBook:
 
         return best_price, opp_orders_at_price
 
-    def _get_best_market_match(self, order: BookOrder, opposite_market_levels: Deque[MutableBookLevel]) -> Optional[MutableBookLevel]:
+    def _get_best_market_match(
+        self,
+        order: BookOrder,
+        opposite_market_levels: Deque[MutableBookLevel],
+    ) -> Optional[Tuple[MutableBookLevel, Decimal]]:
         if not opposite_market_levels:
             return None
 
         best_market_level = opposite_market_levels[0]
-        if not self._is_executable_price(order, best_market_level.price):
+        trade_price = self._market_impact_model.apply_market_impact(
+            self._instrument,
+            order,
+            best_market_level,
+            best_market_level.price,
+        )
+        if not self._is_executable_price(order, trade_price):
             return None
 
-        return best_market_level
+        return best_market_level, trade_price
 
     def _is_executable_price(self, order: BookOrder, price: Decimal) -> bool:
         if order.order_type == OrderType.MARKET:
@@ -224,7 +247,7 @@ class OrderBook:
         return order.price <= price
 
     def _should_match_internal_first(self, side: Side, internal_match: Optional[Tuple[Decimal, OrderedDict[str, BookOrder]]],
-                                     market_match: Optional[MutableBookLevel]) -> bool:
+                                     market_match: Optional[Tuple[MutableBookLevel, Decimal]]) -> bool:
         if internal_match is None:
             return False
 
@@ -232,7 +255,7 @@ class OrderBook:
             return True
 
         internal_price = internal_match[0]
-        market_price = market_match.price
+        market_price = market_match[1]
 
         if side == Side.BUY:
             return internal_price <= market_price
@@ -275,10 +298,14 @@ class OrderBook:
             self._sync_queue_ahead(affected_side, affected_price)
         return result
 
-    def _execute_order_against_market_level(self, order: BookOrder, market_level: MutableBookLevel) -> OrderBookResult:
+    def _execute_order_against_market_level(
+        self,
+        order: BookOrder,
+        market_level: MutableBookLevel,
+        trade_price: Decimal,
+    ) -> OrderBookResult:
         result = OrderBookResult()
         trade_quantity = min(order.remaining_quantity, market_level.quantity)
-        trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, market_level, market_level.price)
         self._add_execution_events(result, order, order.side, trade_price, trade_quantity, order.creation_request_timestamp)
 
         order.remaining_quantity -= trade_quantity
@@ -305,6 +332,8 @@ class OrderBook:
                 if order.price is None:
                     raise RuntimeError(f"Resting order {order.order_id!r} has no price")
                 trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, best_market_ask_level, order.price)
+                if not self._is_executable_price(order, trade_price):
+                    return result
                 trade_quantity = min(order.remaining_quantity, best_market_ask_level.quantity)
                 self._add_execution_events(result, order, Side.SELL, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity
@@ -344,6 +373,8 @@ class OrderBook:
                 if order.price is None:
                     raise RuntimeError(f"Resting order {order.order_id!r} has no price")
                 trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, best_market_bid_level, order.price)
+                if not self._is_executable_price(order, trade_price):
+                    return result
                 trade_quantity = min(order.remaining_quantity, best_market_bid_level.quantity)
                 self._add_execution_events(result, order, Side.BUY, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity

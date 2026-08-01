@@ -11,7 +11,7 @@ from exchange_simulator.schemas.instrument import Instrument
 from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot, MarketTradePrint
 
 
-INSTRUMENT_ID = "XHKG:2603"
+INSTRUMENT_ID = "2603"
 STRATEGY_ID = "test-strategy"
 ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 30)
 INCOMING_ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 31)
@@ -429,6 +429,22 @@ def test_market_trade_print_without_aggressor_side_does_not_fill_resting_order(o
     assert_order_resting_in_order_book(order_book, buy_order, expected_remaining_quantity=50)
 
 
+def test_first_snapshot_seeds_queue_for_an_existing_order(order_book: OrderBook) -> None:
+    buy_order = build_order("buy-resting", Side.BUY, quantity=50, price=Decimal("100"))
+    order_book.add_order(buy_order)
+
+    order_book.on_market_data_snapshot(
+        build_market_data_snapshot(bids=(BookLevel(price=Decimal("100"), quantity=100),))
+    )
+    result = order_book.on_market_trade_print(
+        build_market_trade_print(Decimal("100"), 10, Side.SELL)
+    )
+
+    assert_trade_events(result, [])
+    assert buy_order.queue_ahead == 90
+    assert_order_resting_in_order_book(order_book, buy_order, expected_remaining_quantity=50)
+
+
 def test_market_depth_impact_model_worsens_deeper_market_prices() -> None:
     impact_model = MarketDepthImpactModel(tick_penalty_per_level=2)
     buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("110"))
@@ -473,3 +489,56 @@ def test_market_depth_impact_applies_only_to_market_liquidity_matches(impacted_o
         (Side.BUY, Decimal("101.01"), 100),
         (Side.BUY, Decimal("102"), 100),
     ])
+
+
+def test_market_depth_impact_does_not_execute_buy_beyond_limit(impacted_order_book: OrderBook) -> None:
+    impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            asks=(
+                BookLevel(price=Decimal("100"), quantity=100),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    incoming_buy_order = build_order("buy", Side.BUY, quantity=200, price=Decimal("101"))
+    result = impacted_order_book.add_order(incoming_buy_order)
+
+    assert_trade_events(result, [(Side.BUY, Decimal("100"), 100)])
+    assert incoming_buy_order.remaining_quantity == 100
+    assert_order_resting_in_order_book(impacted_order_book, incoming_buy_order, 100)
+
+
+def test_market_depth_impact_does_not_execute_sell_beyond_limit(impacted_order_book: OrderBook) -> None:
+    impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            bids=(
+                BookLevel(price=Decimal("102"), quantity=100),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    incoming_sell_order = build_order("sell", Side.SELL, quantity=200, price=Decimal("101"))
+    result = impacted_order_book.add_order(incoming_sell_order)
+
+    assert_trade_events(result, [(Side.SELL, Decimal("102"), 100)])
+    assert incoming_sell_order.remaining_quantity == 100
+    assert_order_resting_in_order_book(impacted_order_book, incoming_sell_order, 100)
+
+
+def test_market_depth_impact_does_not_fill_resting_order_beyond_limit(impacted_order_book: OrderBook) -> None:
+    resting_buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("101"))
+    impacted_order_book.add_order(resting_buy_order)
+
+    result = impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            asks=(
+                BookLevel(price=Decimal("100"), quantity=0),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    assert result.trades == []
+    assert_order_resting_in_order_book(impacted_order_book, resting_buy_order, 100)

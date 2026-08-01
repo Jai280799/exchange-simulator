@@ -132,6 +132,11 @@ The sequence is the authoritative way to merge the two historical streams.
 There is no global sequence across different feed instances or simulated
 matching-engine events.
 
+Replay pacing must be applied at source-row boundaries, before the first message
+from the next row. Consumers and replay code must not infer a row boundary solely
+from the message class: a row with a trade begins with `MarketTradePrint`, while
+a row without one begins with `MarketDataSnapshot`.
+
 ## Multiprocessing transport
 
 Each component declares its subscriptions and publications using

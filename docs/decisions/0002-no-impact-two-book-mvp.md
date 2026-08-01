@@ -28,8 +28,8 @@ heuristic and materially increases delivery risk before the demo.
   after simulated consumption.
 - Market impact is intentionally omitted from the baseline.
 - Historical and simulated trades must preserve separate provenance.
-- Passive fills require an explicit approximation; snapshot-touch versus
-  trade-driven behavior remains open.
+- Passive fills require an explicit approximation. This follow-up was resolved
+  by [ADR 0006](0006-trade-driven-passive-queue-fills.md).
 
 ## Alternatives rejected
 
@@ -41,5 +41,6 @@ heuristic and materially increases delivery risk before the demo.
 ## Follow-up work
 
 - Document the chosen cross-book price-priority rule.
-- Decide passive-fill pricing and queue behavior.
+- Apply the passive-fill and queue policy accepted in
+  [ADR 0006](0006-trade-driven-passive-queue-fills.md).
 - Revisit single-book reconstruction only as a post-MVP experiment.
