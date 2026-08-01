@@ -1,7 +1,7 @@
 # Message contracts
 
-Status: **Baseline contract; some entries are in flight**
-Last updated: **2026-07-23**
+Status: **Baseline contract; integration remains incomplete**
+Last updated: **2026-07-28**
 
 ## Rules
 
@@ -20,21 +20,21 @@ consumer loop, and dummy-publisher example, see the
 
 | Topic | Producer | Intended consumer | Schema | Visibility | Status |
 |---|---|---|---|---|---|
-| `StateTopic.MARKET_DATA` | Historical feed | Matching engine, platform, market-data consumers | `MarketDataSnapshot` | Public market observation | On `master`; extended by PR #15 |
-| `StateTopic.MARKET_TRADES` | Historical feed | Platform, strategies, future passive-fill/queue model | `MarketTradePrint` | Public historical observation | In flight in PR #15 |
-| `StateTopic.TRADES` | Matching engine | Platform and public simulated-trade consumers | `Trade` or an explicitly renamed simulated-trade schema | Public simulated event | Topic exists on `master`; PR #14 must preserve it |
+| `StateTopic.MARKET_DATA` | Historical feed | Matching engine, platform, market-data consumers | `MarketDataSnapshot` | Public market observation | On `master` |
+| `StateTopic.MARKET_TRADES` | Historical feed | Platform, strategies, future passive-fill/queue model | `MarketTradePrint` | Public historical observation | On `master` |
+| `StateTopic.TRADES` | Matching engine | Platform and public simulated-trade consumers | `Trade` | Public simulated event | On `master` |
 | `RequestTopic.CREATE_ORDER` | Trading platform | Matching engine | `CreateOrderRequest` | Trusted request | On `master` |
 | `ResponseTopic.CREATE_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
 | `RequestTopic.CANCEL_ORDER` | Trading platform | Matching engine | `CancelOrderRequest` | Trusted request | On `master`; ownership fields under review |
 | `ResponseTopic.CANCEL_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
-| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner | `ExecutionReport` | Private after routing | Proposed in PR #14; routing decision open |
+| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner | `ExecutionReport` | Private after routing | On `master`; routing decision open |
 | `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers | `Order` | Internal state | Reserved on `master`; ownership open |
 
 ## Schema expectations
 
 ### `MarketDataSnapshot`
 
-In-flight PR #15 contract:
+Implemented contract:
 
 - `instrument_id`
 - `sequence`
@@ -47,7 +47,7 @@ orders snapshots relative to historical trade prints.
 
 ### `MarketTradePrint`
 
-In-flight PR #15 contract:
+Implemented contract:
 
 - `instrument_id`
 - `sequence`
@@ -61,7 +61,7 @@ strategy execution and must not be published on `TRADES`.
 
 ### Simulated `Trade`
 
-The `master` schema currently contains:
+The `master` schema contains:
 
 - `trade_id`
 - `instrument_id`
@@ -71,9 +71,8 @@ The `master` schema currently contains:
 - `quantity`
 - `timestamp`
 
-PR #14 proposes a different shape and name. The final schema may change, but the
-event must remain a simulated matching-engine output on `TRADES`. A rename must
-make provenance clearer, not merge it with `MarketTradePrint`.
+The event remains a simulated matching-engine output on `TRADES` and must not be
+merged with `MarketTradePrint`.
 
 ### `CreateOrderRequest`
 
@@ -92,8 +91,7 @@ Limit orders require a price and all quantities must be positive.
 
 ### `CancelOrderRequest`
 
-`master` includes `order_id`, `strategy_id`, `instrument_id`, and `timestamp`.
-PR #14 proposes using only globally unique `order_id` plus `timestamp`.
+`master` uses only globally unique `order_id` plus `timestamp`.
 
 The simplified form is acceptable if the trading platform is the sole trusted
 publisher and validates strategy ownership before forwarding. This trust boundary

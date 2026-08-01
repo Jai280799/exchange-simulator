@@ -1,7 +1,7 @@
 # Exchange simulator architecture
 
-Status: **Accepted baseline with in-flight components**
-Last updated: **2026-07-23**
+Status: **Accepted baseline with incomplete integration**
+Last updated: **2026-07-28**
 
 ## Purpose
 
@@ -18,9 +18,9 @@ explicit interfaces after the baseline works end to end.
 | Area | Status | Notes |
 |---|---|---|
 | Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
-| Historical market-data feed | In flight in PR #15 | Streams five-level snapshots and historical trade prints for one instrument. |
-| Matching engine and order book | In flight in PR #14 | Initial architecture; behavioral rules and integration contracts are still being reviewed. |
-| System controller | Partial in PR #14 | Matching-engine-only wiring exists; full lifecycle and all components are not integrated. |
+| Historical market-data feed | On `master`; lifecycle extension in this change | Streams five-level snapshots and historical trade prints for one instrument; this change adds fixed-interval pacing and a stoppable component runner. |
+| Matching engine and order book | On `master` | Initial architecture is merged; some behavioral policies remain open. |
+| System controller | Partial on `master` | Matching-engine-only wiring exists; the feed and other components are not yet integrated. |
 | Trading platform and strategy | Not integrated | Their request, response, and execution-routing responsibilities must follow the contracts below. |
 
 ## Target component flow
@@ -163,8 +163,8 @@ See [Open questions](open-questions.md).
 
 ## Integration sequence
 
-1. Merge the historical-feed foundation and matching-engine architecture with
-   stable topic/schema contracts.
+1. Keep the merged historical-feed and matching-engine foundations aligned with
+   their stable topic/schema contracts.
 2. Create a dedicated central topology module containing all component specs.
 3. Add the trading platform as the only order-request gateway.
 4. Wire the feed, engine, and platform through the real multiprocessing bus.

@@ -3,9 +3,14 @@ import csv
 import gzip
 import os
 
+import pytest
+
 from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.topics import StateTopic, Topic
-from exchange_simulator.market_data_replay.feed import HistoricalMarketDataFeed
+from exchange_simulator.market_data_replay.feed import (
+    HistoricalMarketDataFeed,
+    run_historical_market_data_feed_component,
+)
 from exchange_simulator.schemas.market_data import MarketDataSnapshot, MarketTradePrint
 
 _HEADER = [
@@ -24,6 +29,26 @@ class RecordingBus(ComponentMessageBus):
 
     def receive(self, timeout: Optional[float] = None) -> Tuple[Topic, Any]:
         raise NotImplementedError
+
+
+class RecordingEvent:
+    def __init__(
+        self,
+        *,
+        wait_results: Optional[List[bool]] = None,
+    ) -> None:
+        self._is_set = False
+        self._wait_results = list(wait_results or [])
+        self.wait_calls: List[Optional[float]] = []
+
+    def is_set(self) -> bool:
+        return self._is_set
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        self.wait_calls.append(timeout)
+        if self._wait_results:
+            self._is_set = self._wait_results.pop(0)
+        return self._is_set
 
 
 def _write_csv(path: str, rows: List[dict]) -> None:
@@ -79,3 +104,95 @@ def test_feed_publishes_in_sequence_order(tmp_path):
     sequences = [m.sequence for _, m in bus.published]
     assert sequences == sorted(sequences)
     assert sequences == list(range(len(sequences)))
+
+
+def test_feed_paces_source_rows_without_splitting_same_row_messages(tmp_path):
+    path = os.path.join(tmp_path, "md.csv.gz")
+    _write_csv(path, [
+        _row("90000000", "50", last_px="100.5", size="50"),
+        _row("90000100", "80", last_px="100.6", size="30"),
+    ])
+    bus = RecordingBus()
+    shutdown_event = RecordingEvent()
+
+    count = HistoricalMarketDataFeed(
+        bus,
+        path,
+        instrument_id="2603",
+        date="2021-08-02",
+        replay_interval_seconds=0.25,
+    ).run(shutdown_event=shutdown_event)
+
+    assert count == 4
+    assert shutdown_event.wait_calls == [0.25]
+    assert [topic for topic, _ in bus.published] == [
+        StateTopic.MARKET_DATA,
+        StateTopic.MARKET_TRADES,
+        StateTopic.MARKET_DATA,
+        StateTopic.MARKET_TRADES,
+    ]
+    assert bus.published[0][1].timestamp == bus.published[1][1].timestamp
+    assert bus.published[2][1].timestamp == bus.published[3][1].timestamp
+
+
+def test_feed_stops_at_row_boundary_when_shutdown_is_requested(tmp_path):
+    path = os.path.join(tmp_path, "md.csv.gz")
+    _write_csv(path, [
+        _row("90000000", "50", last_px="100.5", size="50"),
+        _row("90000100", "80", last_px="100.6", size="30"),
+    ])
+    bus = RecordingBus()
+    shutdown_event = RecordingEvent(wait_results=[True])
+
+    count = HistoricalMarketDataFeed(
+        bus,
+        path,
+        instrument_id="2603",
+        replay_interval_seconds=30.0,
+    ).run(shutdown_event=shutdown_event)
+
+    assert count == 2
+    assert shutdown_event.wait_calls == [30.0]
+    assert [topic for topic, _ in bus.published] == [
+        StateTopic.MARKET_DATA,
+        StateTopic.MARKET_TRADES,
+    ]
+
+
+def test_feed_rejects_negative_replay_interval():
+    bus = RecordingBus()
+
+    with pytest.raises(
+        ValueError,
+        match="replay_interval_seconds must be non-negative",
+    ):
+        HistoricalMarketDataFeed(
+            bus,
+            "unused.csv.gz",
+            instrument_id="2603",
+            replay_interval_seconds=-0.001,
+        )
+
+
+def test_component_runner_waits_for_start_and_runs_feed(tmp_path):
+    path = os.path.join(tmp_path, "md.csv.gz")
+    _write_csv(path, [
+        _row("90000000", "50", last_px="100.5", size="50"),
+    ])
+    bus = RecordingBus()
+    start_event = RecordingEvent()
+    shutdown_event = RecordingEvent()
+
+    count = run_historical_market_data_feed_component(
+        bus=bus,
+        start_event=start_event,
+        shutdown_event=shutdown_event,
+        data_path=path,
+        instrument_id="2603",
+        date="2021-08-02",
+        replay_interval_seconds=0.25,
+    )
+
+    assert count == 2
+    assert start_event.wait_calls == [None]
+    assert shutdown_event.wait_calls == []
