@@ -59,6 +59,11 @@ class TelemetryHub:
         self._simulation_time: Optional[dt.datetime] = None
         self._last_trade_price: Optional[Decimal] = None
         self._last_mid: Optional[Decimal] = None
+        self._best_bid: Optional[Decimal] = None
+        self._best_ask: Optional[Decimal] = None
+        # Only set when a trade actually printed since the last sample, so the
+        # chart can scatter trades instead of carrying a stale price forward.
+        self._trade_since_sample: Optional[Decimal] = None
         self._strategies: Dict[str, Dict[str, Any]] = {
             strategy_id: self._blank_strategy(strategy_id) for strategy_id in self._strategy_ids
         }
@@ -122,13 +127,29 @@ class TelemetryHub:
     def _on_snapshot(self, snapshot: MarketDataSnapshot) -> None:
         self.counters["snapshots"] += 1
         self._simulation_time = snapshot.timestamp
-        self._bids = [{"price": _number(level.price), "quantity": level.quantity} for level in snapshot.bids[:5]]
-        self._asks = [{"price": _number(level.price), "quantity": level.quantity} for level in snapshot.asks[:5]]
+        self._bids = self._ladder(snapshot.bids)
+        self._asks = self._ladder(snapshot.asks)
 
+        self._best_bid = snapshot.bids[0].price if snapshot.bids else None
+        self._best_ask = snapshot.asks[0].price if snapshot.asks else None
         if snapshot.bids and snapshot.asks:
             self._last_mid = (snapshot.bids[0].price + snapshot.asks[0].price) / 2
 
         self._sample(snapshot.timestamp)
+
+    @staticmethod
+    def _ladder(levels: Any, depth: int = 5) -> List[Dict[str, Any]]:
+        """Best-first levels carrying running depth away from the touch."""
+        rows: List[Dict[str, Any]] = []
+        running = 0
+        for level in levels[:depth]:
+            running += level.quantity
+            rows.append({
+                "price": _number(level.price),
+                "quantity": level.quantity,
+                "cumulative": running,
+            })
+        return rows
 
     def _sample(self, timestamp: dt.datetime) -> None:
         self._since_sample += 1
@@ -139,9 +160,12 @@ class TelemetryHub:
         self._series.append({
             "t": _clock(timestamp),
             "mid": _number(self._last_mid),
-            "last": _number(self._last_trade_price),
+            "bid": _number(self._best_bid),
+            "ask": _number(self._best_ask),
+            "trade": _number(self._trade_since_sample),
             "pnl": {sid: state["total_pnl"] for sid, state in self._strategies.items()},
         })
+        self._trade_since_sample = None
 
         if len(self._series) > MAX_POINTS:
             self._series = self._series[::2]
@@ -150,6 +174,7 @@ class TelemetryHub:
     def _on_market_trade(self, trade_print: MarketTradePrint) -> None:
         self.counters["market_trades"] += 1
         self._last_trade_price = trade_print.price
+        self._trade_since_sample = trade_print.price
 
     def _on_simulated_trade(self, trade: Trade) -> None:
         self.counters["simulated_trades"] += 1

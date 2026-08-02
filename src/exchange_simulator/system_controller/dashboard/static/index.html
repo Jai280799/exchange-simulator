@@ -108,14 +108,19 @@
         <h2>Price</h2>
         <canvas id="priceChart" height="230"></canvas>
         <div class="legend">
+          <span><i style="background:#2fbf71"></i>best bid</span>
+          <span><i style="background:#ff5c5c"></i>best ask</span>
           <span><i style="background:#4da3ff"></i>mid</span>
-          <span><i style="background:#ffc857"></i>last trade</span>
+          <span><i style="background:#ffc857;border-radius:50%"></i>trades</span>
         </div>
       </div>
 
       <div class="panel a-book">
-        <h2>Order book</h2>
-        <table class="ladder"><tbody id="ladder"></tbody></table>
+        <h2>Order book · cumulative</h2>
+        <table class="ladder">
+          <thead><tr><th>price</th><th class="num">qty</th><th class="num">cum</th></tr></thead>
+          <tbody id="ladder"></tbody>
+        </table>
       </div>
 
       <div class="panel a-pnl">
@@ -264,26 +269,46 @@ function chart(canvas, seriesList, xLabels) {
   }
 
   seriesList.forEach((series) => {
-    ctx.strokeStyle = series.color; ctx.lineWidth = 1.5; ctx.beginPath();
+    const n = series.points.length;
+
+    if (series.style === "dots") {
+      ctx.fillStyle = series.color;
+      series.points.forEach((value, i) => {
+        if (value === null || value === undefined) return;
+        ctx.beginPath();
+        ctx.arc(x(i, n), y(value), series.radius || 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      return;
+    }
+
+    ctx.strokeStyle = series.color;
+    ctx.lineWidth = series.width || 1.5;
+    ctx.setLineDash(series.style === "dotted" ? [2, 3] : []);
+    ctx.beginPath();
     let started = false;
     series.points.forEach((value, i) => {
-      if (value === null || value === undefined) return;
-      const px = x(i, series.points.length), py = y(value);
+      if (value === null || value === undefined) { started = false; return; }
+      const px = x(i, n), py = y(value);
       if (started) ctx.lineTo(px, py); else { ctx.moveTo(px, py); started = true; }
     });
     ctx.stroke();
+    ctx.setLineDash([]);
   });
 }
 
 function renderLadder(book, mid) {
+  // Asks render outermost-first so depth grows away from the touch on both sides.
   const asks = (book.asks || []).slice().reverse(), bids = book.bids || [];
-  const peak = Math.max(1, ...[...asks, ...bids].map((l) => l.quantity));
+  const depth = (l) => (l.cumulative === undefined ? l.quantity : l.cumulative);
+  const peak = Math.max(1, ...[...asks, ...bids].map(depth));
   const row = (level, side) => `<tr>
-      <td style="width:58%"><span class="bar" style="background:var(--${side});width:${(level.quantity / peak) * 100}%"></span>
+      <td style="width:44%"><span class="bar" style="background:var(--${side});width:${(depth(level) / peak) * 100}%"></span>
       <span class="${side}">${fmt(level.price, 0)}</span></td>
-      <td class="num">${level.quantity.toLocaleString()}</td></tr>`;
+      <td class="num" style="color:var(--muted)">${level.quantity.toLocaleString()}</td>
+      <td class="num">${depth(level).toLocaleString()}</td></tr>`;
   $("ladder").innerHTML = asks.map((l) => row(l, "sell")).join("")
-    + `<tr class="midrow"><td colspan="2">— mid ${fmt(mid, 1)} —</td></tr>`
+    + `<tr class="midrow"><td colspan="3">— mid ${fmt(mid, 1)} —</td></tr>`
     + bids.map((l) => row(l, "buy")).join("");
 }
 
@@ -308,8 +333,10 @@ function render(payload) {
 
   if ($("live").classList.contains("active")) {
     chart($("priceChart"), [
-      {color: "#4da3ff", points: series.map((p) => p.mid)},
-      {color: "#ffc857", points: series.map((p) => p.last)},
+      {color: "#2fbf71", style: "dotted", points: series.map((p) => p.bid)},
+      {color: "#ff5c5c", style: "dotted", points: series.map((p) => p.ask)},
+      {color: "#4da3ff", width: 1.4, points: series.map((p) => p.mid)},
+      {color: "#ffc857", style: "dots", radius: 2.1, points: series.map((p) => p.trade)},
     ], labels);
 
     renderLadder(telemetry.book || {}, telemetry.last_mid);

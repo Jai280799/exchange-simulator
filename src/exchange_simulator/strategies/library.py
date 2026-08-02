@@ -2,8 +2,12 @@
 
 Deliberately simple and deliberately busy: the goal is a visible, continuous
 order flow through the whole pipeline, not alpha. All are seedless and therefore
-reproducible. Position caps are what stop them running away, so the entry
-thresholds can stay tight.
+reproducible.
+
+Each strategy sizes its own orders. Size scales with how far the signal has run
+past its entry threshold, then is clamped by remaining position headroom and by
+the quantity actually displayed at the touch, so a strategy never asks for more
+than the book is showing.
 """
 
 from collections import deque
@@ -11,7 +15,7 @@ from decimal import Decimal
 from typing import Deque, Dict, List, Sequence, Type
 
 from exchange_simulator.schemas.common import Side
-from exchange_simulator.schemas.market_data import MarketDataSnapshot
+from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
 from exchange_simulator.strategies.base import (
     CancelIntent,
     Intent,
@@ -25,7 +29,33 @@ _ZERO = Decimal(0)
 _HUNDRED = Decimal(100)
 
 
-class _PriceWindowStrategy(Strategy):
+class _SizedStrategy(Strategy):
+    """Shared risk-aware sizing."""
+
+    def __init__(self, strategy_id: str, instrument_id: str,
+                 base_quantity: int, max_quantity: int, max_position: int) -> None:
+        super().__init__(strategy_id, instrument_id)
+        self._base_quantity = base_quantity
+        self._max_quantity = max_quantity
+        self._max_position = max_position
+
+    def _headroom(self, side: Side, position: int) -> int:
+        return self._max_position - position if side is Side.BUY else self._max_position + position
+
+    def _size(self, conviction: int, side: Side, view: StrategyView, level: BookLevel) -> int:
+        wanted = self._base_quantity * max(1, conviction)
+        return max(0, min(wanted, self._max_quantity, self._headroom(side, view.position), level.quantity))
+
+    def _cross(self, snapshot: MarketDataSnapshot, side: Side,
+               conviction: int, view: StrategyView) -> Sequence[Intent]:
+        level = snapshot.asks[0] if side is Side.BUY else snapshot.bids[0]
+        quantity = self._size(conviction, side, view, level)
+        if quantity <= 0:
+            return ()
+        return (SubmitIntent(side=side, quantity=quantity, price=level.price),)
+
+
+class _PriceWindowStrategy(_SizedStrategy):
 
     def __init__(
         self,
@@ -33,17 +63,16 @@ class _PriceWindowStrategy(Strategy):
         instrument_id: str,
         lookback: int,
         entry_ticks: float,
-        quantity: int,
+        base_quantity: int,
+        max_quantity: int,
         max_position: int,
         decision_interval: int,
         tick_size: str | Decimal,
     ) -> None:
-        super().__init__(strategy_id, instrument_id)
+        super().__init__(strategy_id, instrument_id, base_quantity, max_quantity, max_position)
         self._window: Deque[Decimal] = deque(maxlen=lookback)
         self._lookback = lookback
         self._entry = Decimal(str(tick_size)) * Decimal(str(entry_ticks))
-        self._quantity = quantity
-        self._max_position = max_position
         self._decision_interval = decision_interval
         self._seen = 0
 
@@ -63,27 +92,32 @@ class _PriceWindowStrategy(Strategy):
 
         return mid
 
-    def _cross(self, snapshot: MarketDataSnapshot, side: Side) -> Sequence[Intent]:
-        price = snapshot.asks[0].price if side is Side.BUY else snapshot.bids[0].price
-        return (SubmitIntent(side=side, quantity=self._quantity, price=price),)
+    def _conviction(self, strength: Decimal) -> int:
+        if self._entry <= 0:
+            return 1
+        return int(abs(strength) / self._entry)
 
 
 class MomentumStrategy(_PriceWindowStrategy):
-    """Buys strength and sells weakness over a short mid-price window."""
+    """Buys strength and sells weakness over a short mid-price window.
+
+    A bigger move over the window is a stronger signal, so it buys more.
+    """
 
     def __init__(
         self,
         strategy_id: str,
         instrument_id: str,
         lookback: int = 20,
-        entry_ticks: int = 1,
-        quantity: int = 4,
-        max_position: int = 40,
+        entry_ticks: float = 1,
+        base_quantity: int = 3,
+        max_quantity: int = 24,
+        max_position: int = 60,
         decision_interval: int = 10,
         tick_size: str | Decimal = "50",
     ) -> None:
-        super().__init__(strategy_id, instrument_id, lookback, entry_ticks,
-                         quantity, max_position, decision_interval, tick_size)
+        super().__init__(strategy_id, instrument_id, lookback, entry_ticks, base_quantity,
+                         max_quantity, max_position, decision_interval, tick_size)
 
     def on_snapshot(self, snapshot: MarketDataSnapshot, view: StrategyView) -> Sequence[Intent]:
         mid = self._sample(snapshot)
@@ -91,15 +125,18 @@ class MomentumStrategy(_PriceWindowStrategy):
             return ()
 
         move = mid - self._window[0]
-        if move >= self._entry and view.position < self._max_position:
-            return self._cross(snapshot, Side.BUY)
-        if move <= -self._entry and view.position > -self._max_position:
-            return self._cross(snapshot, Side.SELL)
-        return ()
+        if abs(move) < self._entry:
+            return ()
+
+        side = Side.BUY if move > 0 else Side.SELL
+        return self._cross(snapshot, side, self._conviction(move), view)
 
 
 class MeanReversionStrategy(_PriceWindowStrategy):
-    """Fades deviations of the mid from its rolling mean."""
+    """Fades deviations of the mid from its rolling mean.
+
+    The further the mid has strayed, the larger the fade.
+    """
 
     def __init__(
         self,
@@ -107,32 +144,33 @@ class MeanReversionStrategy(_PriceWindowStrategy):
         instrument_id: str,
         lookback: int = 40,
         entry_ticks: float = 0.5,
-        quantity: int = 4,
+        base_quantity: int = 2,
+        max_quantity: int = 20,
         max_position: int = 40,
         decision_interval: int = 8,
         tick_size: str | Decimal = "50",
     ) -> None:
-        super().__init__(strategy_id, instrument_id, lookback, entry_ticks,
-                         quantity, max_position, decision_interval, tick_size)
+        super().__init__(strategy_id, instrument_id, lookback, entry_ticks, base_quantity,
+                         max_quantity, max_position, decision_interval, tick_size)
 
     def on_snapshot(self, snapshot: MarketDataSnapshot, view: StrategyView) -> Sequence[Intent]:
         mid = self._sample(snapshot)
         if mid is None:
             return ()
 
-        mean = sum(self._window) / len(self._window)
-        if mid <= mean - self._entry and view.position < self._max_position:
-            return self._cross(snapshot, Side.BUY)
-        if mid >= mean + self._entry and view.position > -self._max_position:
-            return self._cross(snapshot, Side.SELL)
-        return ()
+        deviation = mid - sum(self._window) / len(self._window)
+        if abs(deviation) < self._entry:
+            return ()
+
+        side = Side.BUY if deviation < 0 else Side.SELL
+        return self._cross(snapshot, side, self._conviction(deviation), view)
 
 
-class RSIStrategy(Strategy):
+class RSIStrategy(_SizedStrategy):
     """Classic RSI oscillator on sampled mid prices.
 
-    The bands are deliberately narrow so the oscillator crosses them often
-    during a replay.
+    Size grows with how far the oscillator has pushed past its band, so a
+    saturated reading trades harder than a marginal one.
     """
 
     def __init__(
@@ -143,16 +181,17 @@ class RSIStrategy(Strategy):
         sample_every: int = 4,
         oversold: int = 45,
         overbought: int = 55,
-        quantity: int = 4,
+        conviction_step: int = 5,
+        base_quantity: int = 2,
+        max_quantity: int = 18,
         max_position: int = 40,
     ) -> None:
-        super().__init__(strategy_id, instrument_id)
+        super().__init__(strategy_id, instrument_id, base_quantity, max_quantity, max_position)
         self._period = period
         self._sample_every = sample_every
         self._oversold = Decimal(oversold)
         self._overbought = Decimal(overbought)
-        self._quantity = quantity
-        self._max_position = max_position
+        self._conviction_step = Decimal(conviction_step)
         self._gains: Deque[Decimal] = deque(maxlen=period)
         self._losses: Deque[Decimal] = deque(maxlen=period)
         self._previous_mid: Decimal | None = None
@@ -184,11 +223,14 @@ class RSIStrategy(Strategy):
             return ()
 
         self.rsi = self._compute_rsi()
-        if self.rsi <= self._oversold and view.position < self._max_position:
-            return (SubmitIntent(Side.BUY, self._quantity, snapshot.asks[0].price),)
-        if self.rsi >= self._overbought and view.position > -self._max_position:
-            return (SubmitIntent(Side.SELL, self._quantity, snapshot.bids[0].price),)
+        if self.rsi <= self._oversold:
+            return self._cross(snapshot, Side.BUY, self._conviction(self._oversold - self.rsi), view)
+        if self.rsi >= self._overbought:
+            return self._cross(snapshot, Side.SELL, self._conviction(self.rsi - self._overbought), view)
         return ()
+
+    def _conviction(self, distance: Decimal) -> int:
+        return int(distance / self._conviction_step) + 1
 
     def _compute_rsi(self) -> Decimal:
         average_gain = sum(self._gains) / self._period
@@ -201,11 +243,11 @@ class RSIStrategy(Strategy):
         return _HUNDRED - _HUNDRED / (Decimal(1) + strength)
 
 
-class MarketMakerStrategy(Strategy):
+class MarketMakerStrategy(_SizedStrategy):
     """Posts a two-sided quote around the mid and requotes on a fixed cadence.
 
-    Inventory is pushed back toward flat by skewing both quotes against the
-    current position.
+    Quotes are skewed and sized against inventory: the side that flattens the
+    book is both keener on price and larger in size.
     """
 
     def __init__(
@@ -213,16 +255,15 @@ class MarketMakerStrategy(Strategy):
         strategy_id: str,
         instrument_id: str,
         spread_ticks: int = 1,
-        quantity: int = 3,
+        base_quantity: int = 2,
+        max_quantity: int = 12,
         max_position: int = 30,
         requote_interval: int = 30,
         tick_size: str | Decimal = "50",
     ) -> None:
-        super().__init__(strategy_id, instrument_id)
+        super().__init__(strategy_id, instrument_id, base_quantity, max_quantity, max_position)
         self._tick = Decimal(str(tick_size))
         self._spread = self._tick * spread_ticks
-        self._quantity = quantity
-        self._max_position = max_position
         self._requote_interval = requote_interval
         self._seen = 0
 
@@ -239,14 +280,23 @@ class MarketMakerStrategy(Strategy):
             return ()
 
         intents: List[Intent] = [CancelIntent(order.order_id) for order in view.live_orders]
-        skew = self._tick * (view.position // max(self._quantity, 1))
+        skew = self._tick * (view.position // max(self._base_quantity, 1))
 
-        if view.position < self._max_position:
-            intents.append(SubmitIntent(Side.BUY, self._quantity, mid - self._spread - skew))
-        if view.position > -self._max_position:
-            intents.append(SubmitIntent(Side.SELL, self._quantity, mid + self._spread - skew))
+        bid_size = self._quote_size(Side.BUY, view.position)
+        if bid_size > 0:
+            intents.append(SubmitIntent(Side.BUY, bid_size, mid - self._spread - skew))
+
+        ask_size = self._quote_size(Side.SELL, view.position)
+        if ask_size > 0:
+            intents.append(SubmitIntent(Side.SELL, ask_size, mid + self._spread - skew))
 
         return intents
+
+    def _quote_size(self, side: Side, position: int) -> int:
+        """Lean into the side that reduces inventory."""
+        against_inventory = -position if side is Side.BUY else position
+        wanted = self._base_quantity + max(0, against_inventory) // 2
+        return max(0, min(wanted, self._max_quantity, self._headroom(side, position)))
 
 
 STRATEGY_REGISTRY: Dict[str, Type[Strategy]] = {

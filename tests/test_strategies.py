@@ -38,39 +38,77 @@ class RecordingBus(ComponentMessageBus):
         raise NotImplementedError
 
 
-def snapshot(bid: int, ask: int, sequence: int = 0) -> MarketDataSnapshot:
+def snapshot(bid: int, ask: int, sequence: int = 0, depth: int = 100) -> MarketDataSnapshot:
     return MarketDataSnapshot(
         instrument_id="2603", sequence=sequence, timestamp=TIMESTAMP,
-        bids=(BookLevel(Decimal(bid), 100),), asks=(BookLevel(Decimal(ask), 100),),
+        bids=(BookLevel(Decimal(bid), depth),), asks=(BookLevel(Decimal(ask), depth),),
     )
 
 
-def test_momentum_buys_after_a_rising_window() -> None:
-    strategy = MomentumStrategy("m", "2603", lookback=3, entry_ticks=1,
-                                quantity=2, decision_interval=1, tick_size="50")
+def momentum(**overrides) -> MomentumStrategy:
+    params = dict(lookback=3, entry_ticks=1, base_quantity=2, decision_interval=1, tick_size="50")
+    params.update(overrides)
+    return MomentumStrategy("m", "2603", **params)
 
-    strategy.on_snapshot(snapshot(13300, 13350), FLAT)
-    strategy.on_snapshot(snapshot(13350, 13400), FLAT)
+
+def warm_up(strategy: MomentumStrategy, depth: int = 100) -> None:
+    strategy.on_snapshot(snapshot(13300, 13350, depth=depth), FLAT)
+    strategy.on_snapshot(snapshot(13350, 13400, depth=depth), FLAT)
+
+
+def test_momentum_buys_after_a_rising_window() -> None:
+    strategy = momentum()
+    warm_up(strategy)
+
     intents = strategy.on_snapshot(snapshot(13400, 13450), FLAT)
 
     assert [i.side for i in intents] == [Side.BUY]
     assert intents[0].price == Decimal(13450)
+
+
+def test_momentum_sizes_up_with_a_stronger_move() -> None:
+    weak, strong = momentum(), momentum()
+    warm_up(weak)
+    warm_up(strong)
+
+    # window starts at mid 13325; +100 is two entry ticks, +200 is four.
+    small = weak.on_snapshot(snapshot(13400, 13450), FLAT)
+    large = strong.on_snapshot(snapshot(13500, 13550), FLAT)
+
+    assert small[0].quantity == 4
+    assert large[0].quantity == 8
+
+
+def test_momentum_never_asks_for_more_than_the_book_shows() -> None:
+    strategy = momentum()
+    warm_up(strategy, depth=3)
+
+    intents = strategy.on_snapshot(snapshot(13400, 13450, depth=3), FLAT)
+
+    assert intents[0].quantity == 3
+
+
+def test_momentum_clamps_size_to_remaining_headroom() -> None:
+    strategy = momentum(max_position=5)
+    warm_up(strategy)
+    nearly_full = StrategyView(position=3, realized_pnl=Decimal(0), live_orders=())
+
+    intents = strategy.on_snapshot(snapshot(13400, 13450), nearly_full)
+
     assert intents[0].quantity == 2
 
 
-def test_momentum_respects_the_position_cap() -> None:
-    strategy = MomentumStrategy("m", "2603", lookback=3, entry_ticks=1,
-                                quantity=2, max_position=1, decision_interval=1, tick_size="50")
-
-    strategy.on_snapshot(snapshot(13300, 13350), FLAT)
-    strategy.on_snapshot(snapshot(13350, 13400), FLAT)
+def test_momentum_stays_out_when_the_position_cap_is_reached() -> None:
+    strategy = momentum(max_position=1)
+    warm_up(strategy)
     capped = StrategyView(position=5, realized_pnl=Decimal(0), live_orders=())
 
     assert strategy.on_snapshot(snapshot(13400, 13450), capped) == ()
 
 
-def test_rsi_sells_when_the_oscillator_is_saturated_high() -> None:
-    strategy = RSIStrategy("r", "2603", period=2, sample_every=1, quantity=3)
+def test_rsi_sells_hard_when_the_oscillator_is_saturated_high() -> None:
+    strategy = RSIStrategy("r", "2603", period=2, sample_every=1,
+                           base_quantity=3, max_quantity=12)
 
     intents: Sequence[Intent] = ()
     for step in range(5):
@@ -78,10 +116,23 @@ def test_rsi_sells_when_the_oscillator_is_saturated_high() -> None:
 
     assert strategy.rsi == Decimal(100)
     assert [i.side for i in intents] == [Side.SELL]
+    assert intents[0].quantity == 12  # saturated reading is capped by max_quantity
+
+
+def test_market_maker_sizes_the_side_that_flattens_inventory() -> None:
+    strategy = MarketMakerStrategy("mm", "2603", spread_ticks=1, base_quantity=3,
+                                   requote_interval=1, tick_size="50")
+    long_book = StrategyView(position=10, realized_pnl=Decimal(0), live_orders=())
+
+    intents = strategy.on_snapshot(snapshot(13300, 13350), long_book)
+
+    sizes = {i.side: i.quantity for i in intents if isinstance(i, SubmitIntent)}
+    assert sizes[Side.SELL] > sizes[Side.BUY]
+    assert sizes[Side.BUY] == 3
 
 
 def test_market_maker_cancels_live_quotes_before_requoting() -> None:
-    strategy = MarketMakerStrategy("mm", "2603", spread_ticks=1, quantity=3,
+    strategy = MarketMakerStrategy("mm", "2603", spread_ticks=1, base_quantity=3,
                                    requote_interval=1, tick_size="50")
     resting = Order(
         order_id="mm-0", strategy_id="mm", instrument_id="2603", side=Side.BUY,

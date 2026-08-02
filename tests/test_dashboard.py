@@ -8,7 +8,7 @@ from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.topics import StateTopic, Topic
 from exchange_simulator.schemas.common import OrderFillStatus, OrderStatus, OrderType, Side
 from exchange_simulator.schemas.executions import Trade
-from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
+from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.schemas.order import Order
 from exchange_simulator.schemas.strategy import StrategyUpdate
 from exchange_simulator.system_controller.dashboard.server import create_app
@@ -36,6 +36,15 @@ def snapshot(sequence: int = 0) -> MarketDataSnapshot:
     )
 
 
+def deep_snapshot() -> MarketDataSnapshot:
+    return MarketDataSnapshot(
+        instrument_id="2603", sequence=0, timestamp=TIMESTAMP,
+        bids=(BookLevel(Decimal(13300), 10), BookLevel(Decimal(13250), 30),
+              BookLevel(Decimal(13200), 5)),
+        asks=(BookLevel(Decimal(13350), 20), BookLevel(Decimal(13400), 40)),
+    )
+
+
 def test_telemetry_tracks_the_book_and_mid() -> None:
     telemetry = hub()
 
@@ -44,8 +53,41 @@ def test_telemetry_tracks_the_book_and_mid() -> None:
 
     assert view["counters"]["snapshots"] == 1
     assert view["last_mid"] == 13325.0
-    assert view["book"]["bids"] == [{"price": 13300.0, "quantity": 100}]
-    assert view["book"]["asks"] == [{"price": 13350.0, "quantity": 80}]
+    assert view["book"]["bids"] == [{"price": 13300.0, "quantity": 100, "cumulative": 100}]
+    assert view["book"]["asks"] == [{"price": 13350.0, "quantity": 80, "cumulative": 80}]
+
+
+def test_ladder_depth_is_cumulative_away_from_the_touch() -> None:
+    telemetry = hub()
+
+    telemetry._apply(StateTopic.MARKET_DATA, deep_snapshot())
+    book = telemetry.snapshot()["book"]
+
+    assert [level["cumulative"] for level in book["bids"]] == [10, 40, 45]
+    assert [level["cumulative"] for level in book["asks"]] == [20, 60]
+    for side in ("bids", "asks"):
+        depths = [level["cumulative"] for level in book[side]]
+        assert depths == sorted(depths), f"{side} must be monotonically increasing"
+
+
+def test_series_carries_best_bid_ask_and_scatters_trades() -> None:
+    telemetry = hub()
+
+    telemetry._apply(StateTopic.MARKET_DATA, snapshot())
+    first = telemetry.snapshot()["series"][-1]
+    assert first["bid"] == 13300.0 and first["ask"] == 13350.0
+    assert first["trade"] is None
+
+    telemetry._apply(StateTopic.MARKET_TRADES, MarketTradePrint(
+        instrument_id="2603", sequence=1, timestamp=TIMESTAMP,
+        price=Decimal(13320), quantity=5, cumulative_volume=5,
+    ))
+    telemetry._apply(StateTopic.MARKET_DATA, snapshot(1))
+    assert telemetry.snapshot()["series"][-1]["trade"] == 13320.0
+
+    # no further print, so the next sample must not carry the price forward
+    telemetry._apply(StateTopic.MARKET_DATA, snapshot(2))
+    assert telemetry.snapshot()["series"][-1]["trade"] is None
 
 
 def test_telemetry_records_strategy_pnl() -> None:
