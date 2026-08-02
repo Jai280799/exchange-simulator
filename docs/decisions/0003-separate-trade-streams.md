@@ -41,5 +41,6 @@ tape appear to contain simulated events.
 
 ## Follow-up work
 
-- Resolve PR #14's naming so simulated trades remain on `TRADES`.
+- Keep the merged matching engine and recorder aligned on `TRADES` for simulated
+  trades; do not record historical `MARKET_TRADES` as simulated output.
 - Define execution-report routing separately from public trade publication.

@@ -1,7 +1,7 @@
 # Message contracts
 
 Status: **Baseline contract; integration remains incomplete**
-Last updated: **2026-07-28**
+Last updated: **2026-08-02**
 
 ## Rules
 
@@ -22,13 +22,13 @@ consumer loop, and dummy-publisher example, see the
 |---|---|---|---|---|---|
 | `StateTopic.MARKET_DATA` | Historical feed | Matching engine, platform, market-data consumers | `MarketDataSnapshot` | Public market observation | On `master` |
 | `StateTopic.MARKET_TRADES` | Historical feed | Platform, strategies, future passive-fill/queue model | `MarketTradePrint` | Public historical observation | On `master` |
-| `StateTopic.TRADES` | Matching engine | Platform and public simulated-trade consumers | `Trade` | Public simulated event | On `master` |
+| `StateTopic.TRADES` | Matching engine | Platform, run recorder, and public simulated-trade consumers | `Trade` | Public simulated event | On `master` |
 | `RequestTopic.CREATE_ORDER` | Trading platform | Matching engine | `CreateOrderRequest` | Trusted request | On `master` |
 | `ResponseTopic.CREATE_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
 | `RequestTopic.CANCEL_ORDER` | Trading platform | Matching engine | `CancelOrderRequest` | Trusted request | On `master`; ownership fields under review |
 | `ResponseTopic.CANCEL_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
-| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner | `ExecutionReport` | Private after routing | On `master`; routing decision open |
-| `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers | `Order` | Internal state | Reserved on `master`; ownership open |
+| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder | `ExecutionReport` | Trusted internal/private | On `master`; routing decision open |
+| `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers and run recorder | `Order` | Internal state | Reserved on `master`; producer ownership open |
 
 ## Schema expectations
 
@@ -65,8 +65,7 @@ The `master` schema contains:
 
 - `trade_id`
 - `instrument_id`
-- `buy_order_id`
-- `sell_order_id`
+- `side`
 - `price`
 - `quantity`
 - `timestamp`
@@ -89,6 +88,17 @@ Current contract:
 
 Limit orders require a price and all quantities must be positive.
 
+The MVP uses the source feedcodes `2603` and `2330` as canonical
+`instrument_id` values across market-data messages, order requests, instrument
+configuration, and matching-engine books. `config/instruments.yaml` supplies the
+MIC, currency, tick size, and lot size for each ID. Request quantities must be a
+multiple of the configured lot size, and any supplied price must be a multiple
+of the configured tick size. For incoming aggressive orders, an optional impact
+model may reject an otherwise visible market level when its adjusted execution
+price would violate the order's limit; the default MVP runtime remains
+no-impact. Snapshot-triggered passive fills continue to use the resting order's
+price while that separate policy remains open.
+
 ### `CancelOrderRequest`
 
 `master` uses only globally unique `order_id` plus `timestamp`.
@@ -107,11 +117,34 @@ is still **Open** and is tracked in `open-questions.md`.
 Responses must be published on `ResponseTopic`, never the corresponding
 `RequestTopic`.
 
+## Recording contract
+
+The trusted internal run recorder uses these CSV mappings:
+
+- `ORDERS` -> `orders.csv`;
+- `TRADES` -> `simulated-trades.csv`;
+- `EXECUTION_REPORT` -> `executions.csv`.
+
+The recorder flushes after each row and drains messages already in its inbox
+after shutdown is requested. The controller still owns producer shutdown order,
+run completion, and the run-specific output directory. `orders.csv` remains
+unavailable until the open `ORDERS` producer decision is resolved.
+
 ### `ExecutionReport`
 
-Proposed PR #14 contract represents a fill for one order. The platform must be
-able to route it to exactly the owning strategy, either through `strategy_id` in
-the message or a platform-owned order-to-strategy mapping.
+The implemented contract represents a fill for one order and contains:
+
+- `trade_id`;
+- `order_id`;
+- `instrument_id`;
+- `side`;
+- `price`;
+- `quantity`;
+- `timestamp`.
+
+The platform must be able to route it to exactly the owning strategy, either
+through a future explicit recipient field or a platform-owned order-to-strategy
+mapping.
 
 ## Provenance and ordering
 

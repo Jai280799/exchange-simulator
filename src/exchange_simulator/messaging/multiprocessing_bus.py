@@ -2,10 +2,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 import logging
 from multiprocessing import Queue
-from typing import Any, DefaultDict, Dict, FrozenSet, List, Optional, Tuple, Type
+from typing import Any, DefaultDict, Dict, FrozenSet, List, Optional, Tuple, Type, override
 
-from exchange_simulator.messaging.component_spec import ComponentSpec
-from exchange_simulator.messaging.exceptions import (
+from exchange_simulator.exceptions import (
     DuplicateComponentError,
     MessageTypeError,
     TopologyAlreadyFinalizedError,
@@ -13,6 +12,7 @@ from exchange_simulator.messaging.exceptions import (
     TopicPermissionError,
     UnknownComponentError,
 )
+from exchange_simulator.messaging.component_spec import ComponentSpec
 from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.message_types import MESSAGE_TYPES
 from exchange_simulator.messaging.topics import Topic
@@ -30,6 +30,7 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
     message_types: Dict[Topic, Type[Any]]
     validate_message_types: bool = True
 
+    @override
     def publish(self, topic: Topic, message: Any) -> None:
         if topic not in self.published_topics:
             raise TopicPermissionError(f"Component {self.component_name!r} cannot publish to topic {topic!s}")
@@ -48,6 +49,7 @@ class MultiprocessingComponentMessageBus(ComponentMessageBus):
         for subscriber_queue in subscriber_queues:
             subscriber_queue.put((topic, message))
 
+    @override
     def receive(self, timeout: Optional[float] = None) -> Tuple[Topic, Any]:
         if timeout is None:
             topic, message = self.input_queue.get()

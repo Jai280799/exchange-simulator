@@ -19,8 +19,8 @@ from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.topics import StateTopic
 from exchange_simulator.market_data_replay.loader import read_rows
 from exchange_simulator.market_data_replay.parser import iter_messages
+from exchange_simulator.logging_config import configure_logging
 from exchange_simulator.schemas.market_data import MarketDataSnapshot
-from logging_config import configure_logging
 
 _logger = logging.getLogger(__name__)
 

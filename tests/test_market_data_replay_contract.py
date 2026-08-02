@@ -120,7 +120,7 @@ def test_real_feed_snapshot_reaches_matching_engine_and_triggers_fill(tmp_path):
         instrument_id="2603",
         side=Side.BUY,
         order_type=OrderType.LIMIT,
-        quantity=25,
+        quantity=100,
         price=Decimal("102"),
         timestamp=dt.datetime(2021, 8, 2, 9, 0),
     )
@@ -147,6 +147,6 @@ def test_real_feed_snapshot_reaches_matching_engine_and_triggers_fill(tmp_path):
     assert response.response_status == OrderResponseStatus.ACCEPTED
     assert trade_topic == StateTopic.TRADES
     assert trade.instrument_id == "2603"
-    assert trade.quantity == 25
+    assert trade.quantity == 100
     assert report_topic == StateTopic.EXECUTION_REPORT
     assert execution_report.order_id == resting_buy.order_id

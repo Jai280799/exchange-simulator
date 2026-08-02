@@ -1,7 +1,7 @@
 # Market-data interface
 
 - Status: **Payload and transport on `master`; feed pacing implemented in this change**
-- Last updated: **2026-07-28**
+- Last updated: **2026-08-02**
 
 This document is the integration contract between the historical market-data
 feed and its consumers, including the matching engine, trading platform, and

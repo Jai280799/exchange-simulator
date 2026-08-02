@@ -3,9 +3,11 @@ from decimal import Decimal
 
 import pytest
 
-from exchange_simulator.matching_engine import BookOrder
+from exchange_simulator.matching_engine import BookOrder, MutableBookLevel
+from exchange_simulator.matching_engine.market_impact.models import MarketDepthImpactModel, NoImpactModel
 from exchange_simulator.matching_engine.order_book import OrderBook
 from exchange_simulator.schemas.common import OrderType, Side
+from exchange_simulator.schemas.instrument import Instrument
 from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
 
 
@@ -14,11 +16,24 @@ STRATEGY_ID = "test-strategy"
 ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 30)
 INCOMING_ORDER_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 31)
 MARKET_DATA_TIMESTAMP = dt.datetime(2026, 1, 1, 9, 32)
+INSTRUMENT = Instrument(
+    instrument_id=INSTRUMENT_ID,
+    mic="XHKG",
+    feedcode="2603",
+    trading_currency_id="HKD",
+    tick_size=Decimal("0.01"),
+    lot_size=100,
+)
 
 
 @pytest.fixture
 def order_book() -> OrderBook:
-    return OrderBook()
+    return OrderBook(INSTRUMENT, NoImpactModel())
+
+
+@pytest.fixture
+def impacted_order_book() -> OrderBook:
+    return OrderBook(INSTRUMENT, MarketDepthImpactModel(tick_penalty_per_level=1))
 
 
 def build_order(order_id: str, side: Side, quantity: int, price: Decimal | None = None,
@@ -314,3 +329,105 @@ def test_market_data_snapshot_matches_resting_buys_fifo_at_resting_order_price(o
     assert result.removed_order_ids == ["buy-1", "buy-2"]
     assert_order_removed_from_order_book(order_book, first_buy_order, is_price_level_removed=True)
     assert_order_removed_from_order_book(order_book, second_buy_order, is_price_level_removed=True)
+
+
+def test_market_depth_impact_model_worsens_deeper_market_prices() -> None:
+    impact_model = MarketDepthImpactModel(tick_penalty_per_level=2)
+    buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("110"))
+    sell_order = build_order("sell", Side.SELL, quantity=100, price=Decimal("90"))
+    second_level = MutableBookLevel(price=Decimal("100"), quantity=100, level_index=1)
+
+    assert impact_model.apply_market_impact(INSTRUMENT, buy_order, second_level, Decimal("100")) == Decimal("100.02")
+    assert impact_model.apply_market_impact(INSTRUMENT, sell_order, second_level, Decimal("100")) == Decimal("99.98")
+
+
+def test_market_depth_impact_model_does_not_penalize_top_of_book() -> None:
+    impact_model = MarketDepthImpactModel(tick_penalty_per_level=2)
+    buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("110"))
+    top_level = MutableBookLevel(price=Decimal("100"), quantity=100, level_index=0)
+
+    assert impact_model.apply_market_impact(INSTRUMENT, buy_order, top_level, Decimal("100")) == Decimal("100")
+
+
+def test_market_depth_impact_applies_only_to_market_liquidity_matches(impacted_order_book: OrderBook) -> None:
+    internal_sell_order = build_order("sell-internal", Side.SELL, quantity=100, price=Decimal("102"))
+    impacted_order_book.add_order(internal_sell_order)
+    impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            asks=(
+                BookLevel(price=Decimal("100"), quantity=100),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    incoming_buy_order = build_order(
+        "buy-incoming",
+        Side.BUY,
+        quantity=300,
+        price=Decimal("110"),
+        creation_request_timestamp=INCOMING_ORDER_TIMESTAMP,
+    )
+    result = impacted_order_book.add_order(incoming_buy_order)
+
+    assert_trade_events(result, [
+        (Side.BUY, Decimal("100"), 100),
+        (Side.BUY, Decimal("101.01"), 100),
+        (Side.BUY, Decimal("102"), 100),
+    ])
+
+
+def test_market_depth_impact_does_not_execute_buy_beyond_limit(impacted_order_book: OrderBook) -> None:
+    impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            asks=(
+                BookLevel(price=Decimal("100"), quantity=100),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    incoming_buy_order = build_order("buy", Side.BUY, quantity=200, price=Decimal("101"))
+    result = impacted_order_book.add_order(incoming_buy_order)
+
+    assert_trade_events(result, [(Side.BUY, Decimal("100"), 100)])
+    assert incoming_buy_order.remaining_quantity == 100
+    assert_order_resting_in_order_book(impacted_order_book, incoming_buy_order, 100)
+
+
+def test_market_depth_impact_does_not_execute_sell_beyond_limit(impacted_order_book: OrderBook) -> None:
+    impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            bids=(
+                BookLevel(price=Decimal("102"), quantity=100),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    incoming_sell_order = build_order("sell", Side.SELL, quantity=200, price=Decimal("101"))
+    result = impacted_order_book.add_order(incoming_sell_order)
+
+    assert_trade_events(result, [(Side.SELL, Decimal("102"), 100)])
+    assert incoming_sell_order.remaining_quantity == 100
+    assert_order_resting_in_order_book(impacted_order_book, incoming_sell_order, 100)
+
+
+def test_market_depth_impact_does_not_change_snapshot_triggered_passive_fill_price(
+    impacted_order_book: OrderBook,
+) -> None:
+    resting_buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("105"))
+    impacted_order_book.add_order(resting_buy_order)
+
+    result = impacted_order_book.on_market_data_snapshot(
+        build_market_data_snapshot(
+            asks=(
+                BookLevel(price=Decimal("100"), quantity=0),
+                BookLevel(price=Decimal("101"), quantity=100),
+            )
+        )
+    )
+
+    assert_trade_events(result, [(Side.SELL, Decimal("105"), 100)])
+    assert result.removed_order_ids == [resting_buy_order.order_id]
+    assert_order_removed_from_order_book(impacted_order_book, resting_buy_order, is_price_level_removed=True)
