@@ -22,6 +22,7 @@
   .RUNNING { color: var(--buy); border-color: #22603f; }
   .COMPLETED { color: var(--accent); border-color: #245079; }
   .FAILED { color: var(--sell); border-color: #6e2a2a; }
+  .ctl { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
   .chips { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 11px; }
   .chips b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
   .spacer { flex: 1; }
@@ -89,9 +90,13 @@
   <span id="clock" style="color:var(--muted);font-size:11px">—</span>
   <div class="chips" id="chips"></div>
   <div class="spacer"></div>
-  <select id="dataFile" title="Market-data file"></select>
-  <input id="date" size="9" value="2021-08-02" title="Trading date">
-  <input id="pace" size="5" value="0.002" title="Seconds per source row">
+  <label class="ctl">data
+    <select id="dataFile" title="Historical tick file replayed from var/"></select></label>
+  <label class="ctl">date
+    <input id="date" size="9" value="2021-08-02" title="Trading day to replay (YYYY-MM-DD)"></label>
+  <label class="ctl">sec/row
+    <input id="pace" size="5" value="0.002"
+           title="Replay pace: wall-clock seconds between source rows. 0 replays as fast as the bus allows."></label>
   <button id="start">Start</button>
   <button id="stop" class="ghost">Stop</button>
 </header>
@@ -240,6 +245,7 @@ function chart(canvas, seriesList, xLabels) {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
+  ctx.setLineDash([]);
 
   const values = seriesList.flatMap((s) => s.points).filter((v) => v !== null && v !== undefined);
   if (values.length < 2) {
@@ -262,10 +268,23 @@ function chart(canvas, seriesList, xLabels) {
     ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(width - right, py); ctx.stroke();
     ctx.fillText(fmt(value, 1).padStart(9), 2, py + 3);
   }
-  if (xLabels && xLabels.length) {
-    ctx.fillText(xLabels[0], left, height - 5);
-    const last = xLabels[xLabels.length - 1];
-    ctx.fillText(last, width - right - ctx.measureText(last).width, height - 5);
+  if (xLabels && xLabels.length > 1) {
+    // As many HH:MM:SS labels as fit without crowding.
+    const count = Math.max(2, Math.min(9, Math.floor(plotW / 78)));
+    const n = xLabels.length;
+    for (let i = 0; i < count; i++) {
+      const index = Math.round((i * (n - 1)) / (count - 1));
+      const px = Math.round(x(index, n)) + 0.5;
+
+      ctx.strokeStyle = "#1e242c";
+      ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, top + plotH); ctx.stroke();
+
+      const label = (xLabels[index] || "").slice(0, 8);
+      const textWidth = ctx.measureText(label).width;
+      const tx = i === 0 ? px : i === count - 1 ? px - textWidth : px - textWidth / 2;
+      ctx.fillStyle = "#8c98a8";
+      ctx.fillText(label, tx, height - 5);
+    }
   }
 
   seriesList.forEach((series) => {

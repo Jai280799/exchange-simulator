@@ -6,11 +6,12 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from exchange_simulator.instruments.loader import load_instruments
+from exchange_simulator.system_controller.dashboard.auth import build_auth_dependency
 from exchange_simulator.strategies.library import STRATEGY_REGISTRY
 from exchange_simulator.system_controller.config import (
     DEFAULT_STRATEGIES,
@@ -41,9 +42,17 @@ class StartRequest(BaseModel):
     strategies: Optional[List[StrategyRequest]] = None
 
 
-def create_app(controller: Optional[SessionController] = None) -> FastAPI:
+def create_app(
+    controller: Optional[SessionController] = None,
+    auth_dependency: Optional[Any] = None,
+) -> FastAPI:
     session = controller if controller is not None else SessionController()
-    app = FastAPI(title="Exchange Simulator", version="1.0")
+    guard = auth_dependency if auth_dependency is not None else build_auth_dependency()
+    app = FastAPI(
+        title="Exchange Simulator",
+        version="1.0",
+        dependencies=[Depends(guard)],
+    )
     app.state.controller = session
 
     @app.get("/", response_class=HTMLResponse)

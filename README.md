@@ -56,6 +56,32 @@ Each run writes `runs/<run-id>/` containing `run-config.json`, `system.log`,
 
 Without an editable install, prefix commands with `PYTHONPATH=src`.
 
+### Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `EXCHANGE_SIMULATOR_HOST` | `127.0.0.1` | Interface to bind; also `--host` |
+| `EXCHANGE_SIMULATOR_PORT` | `8000` | Port to bind; also `--port` |
+| `EXCHANGE_SIMULATOR_USER` | `admin` | Dashboard username |
+| `EXCHANGE_SIMULATOR_PASSWORD` | unset | Dashboard password; **no password means no authentication** |
+
+Serving beyond localhost, with authentication on:
+
+```bash
+export EXCHANGE_SIMULATOR_HOST=0.0.0.0
+export EXCHANGE_SIMULATOR_USER=demo
+export EXCHANGE_SIMULATOR_PASSWORD='choose-something'
+python -m exchange_simulator
+```
+
+HTTP Basic guards every route including the SSE stream. Credentials travel
+base64-encoded, not encrypted, so this is a barrier against a curious colleague
+on the same LAN — not a substitute for TLS on an untrusted network.
+
+Start and Stop are unauthenticated when no password is set, so anyone able to
+reach the port can halt a running demo. The app logs a warning when it binds a
+non-loopback interface without one.
+
 ## Tests
 
 ```bash

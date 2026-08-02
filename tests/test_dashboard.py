@@ -11,6 +11,7 @@ from exchange_simulator.schemas.executions import Trade
 from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.schemas.order import Order
 from exchange_simulator.schemas.strategy import StrategyUpdate
+from exchange_simulator.system_controller.dashboard.auth import build_auth_dependency
 from exchange_simulator.system_controller.dashboard.server import create_app
 from exchange_simulator.system_controller.dashboard.telemetry import MAX_POINTS, TelemetryHub
 
@@ -159,3 +160,42 @@ def test_api_rejects_a_missing_data_file() -> None:
 
         assert response.status_code == 400
         assert "not found" in response.json()["detail"]
+
+
+# ----------------------------------------------------------------------- auth
+
+
+def guarded_app():
+    return create_app(auth_dependency=build_auth_dependency(username="demo", password="s3cret"))
+
+
+def test_unauthenticated_request_is_challenged() -> None:
+    with TestClient(guarded_app()) as client:
+        response = client.get("/")
+
+        assert response.status_code == 401
+        assert response.headers["WWW-Authenticate"].startswith("Basic")
+
+
+def test_correct_credentials_are_accepted() -> None:
+    with TestClient(guarded_app()) as client:
+        assert client.get("/", auth=("demo", "s3cret")).status_code == 200
+        assert client.get("/api/session", auth=("demo", "s3cret")).status_code == 200
+
+
+def test_wrong_credentials_are_rejected() -> None:
+    with TestClient(guarded_app()) as client:
+        assert client.get("/", auth=("demo", "wrong")).status_code == 401
+        assert client.get("/", auth=("nobody", "s3cret")).status_code == 401
+
+
+def test_control_endpoints_are_guarded_too() -> None:
+    with TestClient(guarded_app()) as client:
+        assert client.post("/api/session/stop").status_code == 401
+        assert client.post("/api/session/stop", auth=("demo", "s3cret")).status_code == 200
+
+
+def test_auth_is_disabled_when_no_password_is_configured() -> None:
+    app = create_app(auth_dependency=build_auth_dependency(username="demo", password=None))
+    with TestClient(app) as client:
+        assert client.get("/api/session").status_code == 200
