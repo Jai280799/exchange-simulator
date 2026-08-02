@@ -413,8 +413,10 @@ def test_market_depth_impact_does_not_execute_sell_beyond_limit(impacted_order_b
     assert_order_resting_in_order_book(impacted_order_book, incoming_sell_order, 100)
 
 
-def test_market_depth_impact_does_not_fill_resting_order_beyond_limit(impacted_order_book: OrderBook) -> None:
-    resting_buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("101"))
+def test_market_depth_impact_does_not_change_snapshot_triggered_passive_fill_price(
+    impacted_order_book: OrderBook,
+) -> None:
+    resting_buy_order = build_order("buy", Side.BUY, quantity=100, price=Decimal("105"))
     impacted_order_book.add_order(resting_buy_order)
 
     result = impacted_order_book.on_market_data_snapshot(
@@ -426,5 +428,6 @@ def test_market_depth_impact_does_not_fill_resting_order_beyond_limit(impacted_o
         )
     )
 
-    assert result.trades == []
-    assert_order_resting_in_order_book(impacted_order_book, resting_buy_order, 100)
+    assert_trade_events(result, [(Side.SELL, Decimal("105"), 100)])
+    assert result.removed_order_ids == [resting_buy_order.order_id]
+    assert_order_removed_from_order_book(impacted_order_book, resting_buy_order, is_price_level_removed=True)

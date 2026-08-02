@@ -1,7 +1,7 @@
 # Open architecture questions
 
 Status: **Open**
-Last updated: **2026-07-23**
+Last updated: **2026-08-01**
 
 These questions are intentionally unresolved. Temporary behavior in a pull
 request does not settle them.
@@ -31,8 +31,8 @@ Options:
 1. **Global best price:** execute against 100 before 105. This follows best-price
    priority across both sources.
 2. **Participant first:** execute against the strategy ask before historical
-   liquidity. This is simpler and matches the current PR #14 flow, but can give a
-   worse execution despite better displayed liquidity.
+   liquidity. This is simpler and matches the merged matching-engine flow, but
+   can give a worse execution despite better displayed liquidity.
 
 Recommended next step: decide the policy and add a two-source example as an
 acceptance test. Do not hide the decision inside method call order.
@@ -79,6 +79,13 @@ is finite while consumers wait on queues. Define:
 - how processes acknowledge shutdown;
 - timeout and failure behavior;
 - when artifact writers flush and close.
+
+The run recorder uses an interim local rule: after shutdown is requested,
+it consumes queued messages until its inbox is quiet for one receive timeout and
+then closes its sinks. This does not resolve system-wide completion. The
+controller must still define when producers are finished, whether a quiet inbox
+is sufficient or an explicit sentinel is required, and how recorder completion
+is acknowledged.
 
 ## Q5: replay clock
 

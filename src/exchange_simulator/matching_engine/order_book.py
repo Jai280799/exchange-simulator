@@ -228,9 +228,9 @@ class OrderBook:
 
             for order_id in list(buy_orders_at_price.keys()):
                 order = buy_orders_at_price[order_id]
-                trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, best_market_ask_level, order.price)
-                if not self._is_executable_price(order, trade_price):
-                    return result
+                if order.price is None:
+                    raise RuntimeError(f"Resting order {order.order_id!r} has no price")
+                trade_price = order.price
                 trade_quantity = min(order.remaining_quantity, best_market_ask_level.quantity)
                 self._add_execution_events(result, order, Side.SELL, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity
@@ -263,9 +263,9 @@ class OrderBook:
 
             for order_id in list(sell_orders_at_price.keys()):
                 order = sell_orders_at_price[order_id]
-                trade_price = self._market_impact_model.apply_market_impact(self._instrument, order, best_market_bid_level, order.price)
-                if not self._is_executable_price(order, trade_price):
-                    return result
+                if order.price is None:
+                    raise RuntimeError(f"Resting order {order.order_id!r} has no price")
+                trade_price = order.price
                 trade_quantity = min(order.remaining_quantity, best_market_bid_level.quantity)
                 self._add_execution_events(result, order, Side.BUY, trade_price, trade_quantity, market_data_snapshot_timestamp)
                 order.remaining_quantity -= trade_quantity
