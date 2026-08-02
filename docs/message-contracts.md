@@ -1,7 +1,7 @@
 # Message contracts
 
 Status: **Baseline contract; integration remains incomplete**
-Last updated: **2026-08-01**
+Last updated: **2026-08-02**
 
 ## Rules
 

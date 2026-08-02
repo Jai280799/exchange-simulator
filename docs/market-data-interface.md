@@ -1,7 +1,7 @@
 # Market-data interface
 
-- Status: **Payload and multiprocessing transport implemented on `master`**
-- Last updated: **2026-07-24**
+- Status: **Payload and transport on `master`; feed pacing implemented in this change**
+- Last updated: **2026-08-02**
 
 This document is the integration contract between the historical market-data
 feed and its consumers, including the matching engine, trading platform, and
@@ -125,6 +125,21 @@ The sequence is the authoritative way to merge the two historical streams.
 There is no global sequence across different feed instances or simulated
 matching-engine events.
 
+## Replay pacing and component lifecycle
+
+`HistoricalMarketDataFeed` accepts `replay_interval_seconds`, which defaults to
+zero for full-speed replay. A positive value waits between source rows. It does
+not wait between a snapshot and the optional historical trade print reconstructed
+from the same row, so those messages remain adjacent.
+
+The delay controls wall-clock publication pace only. It does not replace or
+modify the historical event timestamp carried by either payload.
+
+The feed's process runner waits on the shared start event and accepts a shutdown
+event. Shutdown is checked at row boundaries, and a paced wait is interruptible.
+End-of-stream notification, downstream queue draining, and controller-owned
+completion remain part of the integration work.
+
 ## Multiprocessing transport
 
 Each component declares its subscriptions and publications using
@@ -236,13 +251,15 @@ Already implemented:
 - topic names and topic-to-schema validation;
 - best-first book ordering;
 - shared historical sequence semantics;
-- publish/subscribe fan-out through multiprocessing queues.
+- publish/subscribe fan-out through multiprocessing queues;
+- configurable fixed-interval pacing between source rows;
+- coordinated start and interruptible shutdown hooks for a feed process.
 
 Still open or incomplete:
 
 - the controller's readiness and end-of-stream protocol;
 - graceful shutdown and queue draining;
-- replay pacing;
+- controller configuration and the presentation's default replay interval;
 - whether strategies subscribe directly or receive a platform-owned projection;
 - complete feed, engine, platform, and strategy wiring.
 

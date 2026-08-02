@@ -1,7 +1,7 @@
 # Open architecture questions
 
 Status: **Open**
-Last updated: **2026-08-01**
+Last updated: **2026-08-02**
 
 These questions are intentionally unresolved. Temporary behavior in a pull
 request does not settle them.
@@ -92,15 +92,19 @@ is acknowledged.
 Options:
 
 - full-speed deterministic replay;
+- fixed-interval replay;
 - wall-clock pacing using historical time deltas;
 - configurable speed multiplier;
 - controller-owned simulated clock.
 
-Configurable pacing is required by
-[ADR 0005](decisions/0005-one-command-demo-runtime.md). The remaining decision is
-which mode, multiplier, and dataset should be the presentation default. It
-should produce useful activity for the expected presentation duration without
-changing the ordering promised by the replay.
+Full-speed replay is on `master`, and configurable fixed-interval replay is
+implemented in this change. The interval changes wall-clock publication timing
+without changing source timestamps or historical ordering.
+
+The remaining decision is which interval and dataset should be the presentation
+default, or whether a historical-delta/speed-multiplier mode is needed. It should
+produce useful activity for the expected presentation duration without changing
+the ordering promised by the replay.
 
 The operational acceptance criteria and rehearsal steps are in the
 [demo runbook](demo-runbook.md).

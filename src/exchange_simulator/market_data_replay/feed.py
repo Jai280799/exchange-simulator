@@ -10,19 +10,31 @@ trades (per the agreed two-book / no-impact model). Message construction and tra
 reconstruction live in :mod:`parser`; this component only sequences and publishes.
 """
 
-from typing import Optional
 import logging
+import time
+from typing import Optional, Protocol
 
 from exchange_simulator.messaging.component_spec import ComponentSpec
 from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.topics import StateTopic
 from exchange_simulator.market_data_replay.loader import read_rows
 from exchange_simulator.market_data_replay.parser import iter_messages
+from exchange_simulator.logging_config import configure_logging
 from exchange_simulator.schemas.market_data import MarketDataSnapshot
 
 _logger = logging.getLogger(__name__)
 
 COMPONENT_NAME = "market_data_feed"
+
+
+class EventLike(Protocol):
+    """Subset of the multiprocessing event API used by the feed."""
+
+    def is_set(self) -> bool:
+        ...
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        ...
 
 
 def component_spec() -> ComponentSpec:
@@ -40,28 +52,90 @@ class HistoricalMarketDataFeed:
         data_path: str,
         instrument_id: str,
         date: Optional[str] = None,
+        replay_interval_seconds: float = 0.0,
     ) -> None:
+        if replay_interval_seconds < 0:
+            raise ValueError("replay_interval_seconds must be non-negative")
+
         self._bus = bus
         self._data_path = data_path
         self._instrument_id = instrument_id
         self._date = date
+        self._replay_interval_seconds = replay_interval_seconds
 
-    def run(self) -> int:
-        """Replay the configured day, publishing every message. Returns the count."""
+    def run(self, shutdown_event: Optional[EventLike] = None) -> int:
+        """Replay source rows until end-of-file or a shutdown request.
+
+        A fixed interval is applied between source rows, not between messages.
+        This keeps a snapshot and the optional trade print derived from that row
+        adjacent on the bus. Source timestamps are preserved in both payloads.
+        """
         _logger.info(
-            "Starting historical market-data feed for %s (%s) from %s",
+            "Starting historical market-data feed for %s (%s) from %s at %.3f seconds per row",
             self._instrument_id,
             self._date or "all dates",
             self._data_path,
+            self._replay_interval_seconds,
         )
         published = 0
+        first_row = True
+        stopped = False
         rows = read_rows(self._data_path, date=self._date)
         for message in iter_messages(rows, instrument_id=self._instrument_id):
             if isinstance(message, MarketDataSnapshot):
+                if first_row:
+                    if shutdown_event is not None and shutdown_event.is_set():
+                        stopped = True
+                        break
+                    first_row = False
+                elif self._wait_for_next_row(shutdown_event):
+                    stopped = True
+                    break
+
                 self._bus.publish(StateTopic.MARKET_DATA, message)
             else:
                 self._bus.publish(StateTopic.MARKET_TRADES, message)
             published += 1
 
-        _logger.info("Historical market-data feed finished; published %d messages", published)
+        outcome = "stopped" if stopped else "finished"
+        _logger.info(
+            "Historical market-data feed %s; published %d messages",
+            outcome,
+            published,
+        )
         return published
+
+    def _wait_for_next_row(
+        self,
+        shutdown_event: Optional[EventLike],
+    ) -> bool:
+        if shutdown_event is not None:
+            return shutdown_event.wait(self._replay_interval_seconds)
+
+        if self._replay_interval_seconds > 0:
+            time.sleep(self._replay_interval_seconds)
+        return False
+
+
+def run_historical_market_data_feed_component(
+    bus: ComponentMessageBus,
+    start_event: EventLike,
+    shutdown_event: EventLike,
+    data_path: str,
+    instrument_id: str,
+    date: Optional[str] = None,
+    replay_interval_seconds: float = 0.0,
+) -> int:
+    """Run the feed behind the same lifecycle events as other components."""
+    configure_logging()
+    _logger.info("Historical market-data feed component is waiting to start")
+    start_event.wait()
+
+    feed = HistoricalMarketDataFeed(
+        bus=bus,
+        data_path=data_path,
+        instrument_id=instrument_id,
+        date=date,
+        replay_interval_seconds=replay_interval_seconds,
+    )
+    return feed.run(shutdown_event=shutdown_event)

@@ -1,7 +1,7 @@
 # Exchange simulator architecture
 
 Status: **Accepted baseline with incomplete integration**
-Last updated: **2026-08-01**
+Last updated: **2026-08-02**
 
 ## Purpose
 
@@ -18,7 +18,7 @@ explicit interfaces after the baseline works end to end.
 | Area | Status | Notes |
 |---|---|---|
 | Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
-| Historical market-data feed | On `master` | Streams five-level snapshots and historical trade prints for one instrument. |
+| Historical market-data feed | On `master`; lifecycle extension in this change | Streams five-level snapshots and historical trade prints for one instrument; this change adds fixed-interval pacing and a stoppable component runner. |
 | Matching engine and order book | On `master` | Initial architecture is merged; some behavioral policies remain open. |
 | System controller | Partial on `master` | Matching-engine and recorder wiring exist; the feed and other components are not yet integrated. |
 | Run recorder | On `master` | Records order state, simulated trades, and execution reports as CSV artifacts; complete run orchestration remains integration work. |
