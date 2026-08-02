@@ -13,6 +13,88 @@ cross-component message contracts, accepted decision records, and unresolved
 questions. These documents are the source of truth when temporary pull-request
 code and settled design differ.
 
+### Component and message flow
+
+Every component is a separate process. They never call each other; they exchange
+typed messages over topic-validated `multiprocessing.Queue` fan-out, and the
+whole topology is declared centrally in `system_controller/component_specs.py`.
+
+```mermaid
+flowchart LR
+    DATA[("var/<br/>tick data")]
+    OUT[("runs/<br/>artifacts")]
+
+    subgraph KIDS["Component processes"]
+        direction LR
+        FEED["market_data_feed"]
+        STRAT["strategies<br/>momentum · mean_reversion<br/>rsi · market_maker"]
+        PLAT["trading_platform<br/>trusted gateway"]
+        ENG["matching_engine<br/>strategy book<br/>+ historical book"]
+        REC["run_recorder"]
+
+        FEED -->|"MARKET_DATA"| ENG
+        FEED -->|"MARKET_DATA<br/>MARKET_TRADES"| STRAT
+        FEED -->|"MARKET_DATA<br/>MARKET_TRADES"| PLAT
+        STRAT -->|"STRATEGY_INTENT"| PLAT
+        PLAT -->|"STRATEGY_UPDATE"| STRAT
+        PLAT -->|"CREATE_ORDER<br/>CANCEL_ORDER"| ENG
+        ENG -->|"responses<br/>EXECUTION_REPORT"| PLAT
+        PLAT -->|"ORDERS"| REC
+        ENG -->|"TRADES<br/>EXECUTION_REPORT"| REC
+    end
+
+    DATA --> FEED
+    REC --> OUT
+```
+
+Two rules the diagram encodes. Strategies **cannot** reach the matching engine:
+they publish intent, and only the trading platform may turn it into an order
+request, which is where ownership and tick/lot conformance are enforced. And
+historical trades (`MARKET_TRADES`) never mix with simulated ones (`TRADES`).
+
+### Control plane
+
+The web layer never touches components directly. It drives `SessionController`,
+which owns process supervision, and reads a `TelemetryHub` that observes the
+system through the same declared topology as every other component.
+
+`FastAPI`, `SessionController` and `TelemetryHub` all live in the single main
+process; everything below the dotted arrow is a spawned child.
+
+```mermaid
+flowchart LR
+    BROWSER(["Browser"]) <-->|"HTTP + SSE"| WEB["FastAPI + uvicorn<br/>page · SSE · control API"]
+    WEB -->|"start · stop"| CTRL["SessionController<br/>topology · readiness<br/>drain · summary"]
+    CTRL -.->|"spawn · start · shutdown"| KIDS["Component processes"]
+    KIDS -.->|"market, order and PnL topics"| TEL["TelemetryHub"]
+    TEL -->|"live snapshot"| WEB
+    CTRL -->|"run-config · system.log · summary"| OUT[("runs/<br/>artifacts")]
+```
+
+### Session lifecycle
+
+Replay does not start until every component reports ready. The feed process
+exiting *is* end of stream.
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> STARTING: start requested
+    STARTING --> READY: all components ready
+    READY --> RUNNING: replay begins
+    RUNNING --> DRAINING: feed exits, or stop requested
+    DRAINING --> COMPLETED: queues quiet, children joined
+    STARTING --> FAILED
+    READY --> FAILED
+    RUNNING --> FAILED
+    DRAINING --> FAILED
+    COMPLETED --> [*]
+    FAILED --> [*]
+```
+
+See [ADR 0006](docs/decisions/0006-strategy-processes-and-intent-channel.md) and
+[ADR 0007](docs/decisions/0007-session-lifecycle-and-web-control.md).
+
 ## Environment Setup (Python 3.13)
 
 Use Python **3.13.x** (latest patch version is fine).

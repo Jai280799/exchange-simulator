@@ -94,9 +94,9 @@
     <select id="dataFile" title="Historical tick file replayed from var/"></select></label>
   <label class="ctl">date
     <input id="date" size="9" value="2021-08-02" title="Trading day to replay (YYYY-MM-DD)"></label>
-  <label class="ctl">sec/row
-    <input id="pace" size="5" value="0.002"
-           title="Replay pace: wall-clock seconds between source rows. 0 replays as fast as the bus allows."></label>
+  <label class="ctl">rows/sec
+    <input id="rate" size="5" value="500"
+           title="Replay speed in source rows per second. 0 means as fast as the bus allows (~1200/s)."></label>
   <button id="start">Start</button>
   <button id="stop" class="ghost">Stop</button>
 </header>
@@ -223,12 +223,14 @@ $("start").onclick = async () => {
   const strategies = [...document.querySelectorAll("#strategyPicker input")].map((input) => ({
     strategy_id: input.dataset.id, kind: input.dataset.kind, enabled: input.checked,
   }));
+  // The feed is paced by seconds-per-row; rows-per-second is the readable form.
+  const rate = parseFloat($("rate").value);
   const response = await fetch("/api/session/start", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       data_path: $("dataFile").value || null,
       date: $("date").value || null,
-      replay_interval_seconds: parseFloat($("pace").value) || 0,
+      replay_interval_seconds: rate > 0 ? 1 / rate : 0,
       strategies,
     }),
   });
