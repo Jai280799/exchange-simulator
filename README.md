@@ -4,7 +4,7 @@
 
 - LIM, Hyungmin (group leader)
 - JITENDRA JAIN, Jai
-- KONG, Lington
+- KONG, Lingtong
 
 ## Architecture and decisions
 

@@ -7,3 +7,9 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# AI
+AGENTS.md
+
+# Local data / run artifacts
+var/
