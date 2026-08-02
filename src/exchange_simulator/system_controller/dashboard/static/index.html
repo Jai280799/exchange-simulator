@@ -12,124 +12,144 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-           padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
-  h1 { font-size: 14px; margin: 0; letter-spacing: .04em; }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+           padding: 9px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 13px; margin: 0; letter-spacing: .05em; white-space: nowrap; }
   .pill { padding: 2px 10px; border-radius: 999px; font-size: 11px; letter-spacing: .06em;
-          border: 1px solid var(--line); }
+          border: 1px solid var(--line); white-space: nowrap; }
   .IDLE { color: var(--muted); }
   .STARTING, .READY, .DRAINING { color: #ffc857; border-color: #6b5a24; }
   .RUNNING { color: var(--buy); border-color: #22603f; }
   .COMPLETED { color: var(--accent); border-color: #245079; }
   .FAILED { color: var(--sell); border-color: #6e2a2a; }
+  .chips { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 11px; }
+  .chips b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
   .spacer { flex: 1; }
-  button { background: var(--accent); color: #06101c; border: 0; padding: 6px 14px;
+  button { background: var(--accent); color: #06101c; border: 0; padding: 5px 13px;
            border-radius: 4px; font: inherit; font-weight: 600; cursor: pointer; }
   button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
   button:disabled { opacity: .4; cursor: not-allowed; }
   select, input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
-                  border-radius: 4px; padding: 5px 8px; font: inherit; }
-  nav { display: flex; gap: 4px; padding: 8px 16px 0; }
+                  border-radius: 4px; padding: 4px 7px; font: inherit; }
+  nav { display: flex; gap: 4px; padding: 7px 16px 0; }
   nav button { background: transparent; color: var(--muted); border-bottom: 2px solid transparent;
-               border-radius: 0; font-weight: 500; }
+               border-radius: 0; font-weight: 500; padding: 5px 10px; }
   nav button.active { color: var(--text); border-bottom-color: var(--accent); }
-  main { padding: 12px 16px 32px; }
+  main { padding: 10px 16px 24px; }
   .tab { display: none; } .tab.active { display: block; }
-  .grid { display: grid; gap: 12px; }
-  .g-market { grid-template-columns: minmax(0,3fr) minmax(260px,1fr); }
-  .g-half { grid-template-columns: repeat(2, minmax(0,1fr)); }
-  @media (max-width: 900px) { .g-market, .g-half { grid-template-columns: 1fr; } }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
-  .panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
-              color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+           padding: 8px 11px; min-width: 0; }
+  .panel h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .11em;
+              color: var(--muted); margin: 0 0 6px; font-weight: 600; }
+
+  .live { display: grid; gap: 10px;
+          grid-template-columns: minmax(0, 2.3fr) minmax(230px, .7fr);
+          grid-template-areas: "price book" "pnl book" "strats strats" "blotters blotters"; }
+  .a-price { grid-area: price; } .a-book { grid-area: book; }
+  .a-pnl { grid-area: pnl; } .a-strats { grid-area: strats; }
+  .a-blotters { grid-area: blotters; display: grid; gap: 10px;
+                grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 1000px) {
+    .live { grid-template-columns: 1fr;
+            grid-template-areas: "price" "book" "pnl" "strats" "blotters"; }
+    .a-blotters { grid-template-columns: 1fr; }
+  }
+  .g-half { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .g-half { grid-template-columns: 1fr; } }
+
   canvas { width: 100%; display: block; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; color: var(--muted); font-weight: 500; padding: 3px 6px;
-       border-bottom: 1px solid var(--line); font-size: 11px; }
-  td { padding: 3px 6px; border-bottom: 1px solid rgba(38,45,54,.5); white-space: nowrap; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 6px;
+       border-bottom: 1px solid var(--line); font-size: 10px; text-transform: uppercase;
+       letter-spacing: .05em; white-space: nowrap; }
+  td { padding: 2px 6px; border-bottom: 1px solid rgba(38,45,54,.5); white-space: nowrap; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   .buy { color: var(--buy); } .sell { color: var(--sell); }
   .pos { color: var(--buy); } .neg { color: var(--sell); }
-  .scroll { max-height: 260px; overflow-y: auto; }
-  .stats { display: flex; gap: 20px; flex-wrap: wrap; }
-  .stat b { display: block; font-size: 17px; font-weight: 600; }
-  .stat span { color: var(--muted); font-size: 11px; }
-  .ladder td { border: 0; padding: 2px 6px; position: relative; }
+  .scroll { max-height: 172px; overflow-y: auto; }
+  .ladder td { border: 0; padding: 1px 6px; position: relative; }
   .bar { position: absolute; inset: 0 auto 0 0; opacity: .16; }
-  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; }
+  .midrow td { color: var(--muted); padding: 5px 6px; font-size: 11px; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; font-size: 11px;
+            color: var(--muted); }
   .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+  .swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
   pre { margin: 0; font-size: 11px; color: var(--muted); white-space: pre-wrap; }
   .err { color: var(--sell); }
   label.chk { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; font-size: 12px; }
+  .stats { display: flex; gap: 20px; flex-wrap: wrap; }
+  .stat b { display: block; font-size: 17px; font-weight: 600; }
+  .stat span { color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
 <header>
   <h1>EXCHANGE SIMULATOR</h1>
   <span id="state" class="pill IDLE">IDLE</span>
-  <span class="muted" id="clock" style="color:var(--muted)">—</span>
+  <span id="clock" style="color:var(--muted);font-size:11px">—</span>
+  <div class="chips" id="chips"></div>
   <div class="spacer"></div>
   <select id="dataFile" title="Market-data file"></select>
-  <input id="date" size="10" value="2021-08-02" title="Trading date">
-  <input id="pace" size="6" value="0.002" title="Seconds per source row">
+  <input id="date" size="9" value="2021-08-02" title="Trading date">
+  <input id="pace" size="5" value="0.002" title="Seconds per source row">
   <button id="start">Start</button>
   <button id="stop" class="ghost">Stop</button>
 </header>
 
 <nav>
-  <button data-tab="market" class="active">Market</button>
-  <button data-tab="strategies">Strategies</button>
+  <button data-tab="live" class="active">Live</button>
   <button data-tab="session">Session</button>
 </nav>
 
 <main>
-  <section id="market" class="tab active">
-    <div class="grid g-market">
-      <div class="panel">
+  <section id="live" class="tab active">
+    <div class="live">
+      <div class="panel a-price">
         <h2>Price</h2>
-        <canvas id="priceChart" height="320"></canvas>
+        <canvas id="priceChart" height="230"></canvas>
         <div class="legend">
           <span><i style="background:#4da3ff"></i>mid</span>
           <span><i style="background:#ffc857"></i>last trade</span>
         </div>
       </div>
-      <div class="panel">
+
+      <div class="panel a-book">
         <h2>Order book</h2>
         <table class="ladder"><tbody id="ladder"></tbody></table>
       </div>
-    </div>
-    <div class="grid g-half" style="margin-top:12px">
-      <div class="panel">
-        <h2>Simulated trades</h2>
-        <div class="scroll"><table><thead><tr><th>time</th><th>side</th><th class="num">price</th><th class="num">qty</th></tr></thead><tbody id="trades"></tbody></table></div>
-      </div>
-      <div class="panel">
-        <h2>Executions</h2>
-        <div class="scroll"><table><thead><tr><th>time</th><th>order</th><th>side</th><th class="num">price</th><th class="num">qty</th></tr></thead><tbody id="execs"></tbody></table></div>
-      </div>
-    </div>
-  </section>
 
-  <section id="strategies" class="tab">
-    <div class="panel">
-      <h2>Total PnL by strategy</h2>
-      <canvas id="pnlChart" height="280"></canvas>
-      <div class="legend" id="pnlLegend"></div>
-    </div>
-    <div class="panel" style="margin-top:12px">
-      <h2>Positions and PnL</h2>
-      <table>
-        <thead><tr>
-          <th>strategy</th><th class="num">position</th><th class="num">avg cost</th>
-          <th class="num">realized</th><th class="num">unrealized</th><th class="num">total</th>
-          <th class="num">live</th><th class="num">orders</th><th class="num">fills</th>
-        </tr></thead>
-        <tbody id="stratRows"></tbody>
-      </table>
-    </div>
-    <div class="panel" style="margin-top:12px">
-      <h2>Recent orders</h2>
-      <div class="scroll"><table><thead><tr><th>time</th><th>order</th><th>strategy</th><th>side</th><th class="num">price</th><th class="num">qty</th><th class="num">rem</th><th>status</th></tr></thead><tbody id="orders"></tbody></table></div>
+      <div class="panel a-pnl">
+        <h2>Total PnL by strategy</h2>
+        <canvas id="pnlChart" height="180"></canvas>
+        <div class="legend" id="pnlLegend"></div>
+      </div>
+
+      <div class="panel a-strats">
+        <h2>Strategies</h2>
+        <table>
+          <thead><tr>
+            <th>strategy</th><th class="num">pos</th><th class="num">avg cost</th>
+            <th class="num">realized</th><th class="num">unrealized</th><th class="num">total</th>
+            <th class="num">live</th><th class="num">orders</th><th class="num">fills</th>
+          </tr></thead>
+          <tbody id="stratRows"></tbody>
+        </table>
+      </div>
+
+      <div class="a-blotters">
+        <div class="panel">
+          <h2>Simulated trades</h2>
+          <div class="scroll"><table><thead><tr><th>time</th><th>side</th><th class="num">price</th><th class="num">qty</th></tr></thead><tbody id="trades"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <h2>Executions</h2>
+          <div class="scroll"><table><thead><tr><th>time</th><th>order</th><th>side</th><th class="num">price</th><th class="num">qty</th></tr></thead><tbody id="execs"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <h2>Orders</h2>
+          <div class="scroll"><table><thead><tr><th>time</th><th>strategy</th><th>side</th><th class="num">price</th><th class="num">rem</th><th>status</th></tr></thead><tbody id="orders"></tbody></table></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -138,7 +158,7 @@
       <h2>Counters</h2>
       <div class="stats" id="counters"></div>
     </div>
-    <div class="grid g-half" style="margin-top:12px">
+    <div class="g-half" style="margin-top:10px">
       <div class="panel">
         <h2>Components</h2>
         <table><thead><tr><th>component</th><th>ready</th><th>alive</th><th class="num">exit</th></tr></thead><tbody id="components"></tbody></table>
@@ -149,7 +169,7 @@
         <p style="color:var(--muted);font-size:11px">Applied on the next Start.</p>
       </div>
     </div>
-    <div class="panel" style="margin-top:12px">
+    <div class="panel" style="margin-top:10px">
       <h2>Run</h2>
       <pre id="runInfo">No session yet.</pre>
     </div>
@@ -160,7 +180,6 @@
 const PALETTE = ["#4da3ff", "#2fbf71", "#ffc857", "#c792ea", "#ff8a65", "#4dd0e1"];
 const $ = (id) => document.getElementById(id);
 let latest = null;
-let defaults = null;
 
 document.querySelectorAll("nav button").forEach((button) => {
   button.onclick = () => {
@@ -184,7 +203,6 @@ function signClass(value) {
 
 async function loadOptions() {
   const options = await (await fetch("/api/options")).json();
-  defaults = options;
   $("dataFile").innerHTML = options.data_files.map((f) => `<option value="${f}">${f.split("/").pop()}</option>`).join("")
     || `<option value="">no file in var/</option>`;
   $("strategyPicker").innerHTML = options.default_strategies.map((s) =>
@@ -195,14 +213,14 @@ $("start").onclick = async () => {
   const strategies = [...document.querySelectorAll("#strategyPicker input")].map((input) => ({
     strategy_id: input.dataset.id, kind: input.dataset.kind, enabled: input.checked,
   }));
-  const body = {
-    data_path: $("dataFile").value || null,
-    date: $("date").value || null,
-    replay_interval_seconds: parseFloat($("pace").value) || 0,
-    strategies,
-  };
   const response = await fetch("/api/session/start", {
-    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      data_path: $("dataFile").value || null,
+      date: $("date").value || null,
+      replay_interval_seconds: parseFloat($("pace").value) || 0,
+      strategies,
+    }),
   });
   if (!response.ok) alert((await response.json()).detail || "Could not start session");
 };
@@ -212,6 +230,7 @@ $("stop").onclick = () => fetch("/api/session/stop", {method: "POST"});
 function chart(canvas, seriesList, xLabels) {
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth, height = canvas.height;
+  if (!width) return;
   canvas.width = width * ratio; canvas.style.height = height + "px";
   const ctx = canvas.getContext("2d");
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -227,7 +246,7 @@ function chart(canvas, seriesList, xLabels) {
   let min = Math.min(...values), max = Math.max(...values);
   if (max - min < 1e-9) { max += 1; min -= 1; }
   const pad = (max - min) * 0.08; min -= pad; max += pad;
-  const left = 62, right = 10, top = 10, bottom = 22;
+  const left = 60, right = 8, top = 8, bottom = 18;
   const plotW = width - left - right, plotH = height - top - bottom;
   const x = (i, n) => left + (n <= 1 ? plotW : (i / (n - 1)) * plotW);
   const y = (v) => top + plotH - ((v - min) / (max - min)) * plotH;
@@ -236,16 +255,16 @@ function chart(canvas, seriesList, xLabels) {
   for (let i = 0; i <= 4; i++) {
     const value = min + ((max - min) * i) / 4, py = Math.round(y(value)) + 0.5;
     ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(width - right, py); ctx.stroke();
-    ctx.fillText(fmt(value, 1).padStart(9), 4, py + 3);
+    ctx.fillText(fmt(value, 1).padStart(9), 2, py + 3);
   }
   if (xLabels && xLabels.length) {
-    ctx.fillText(xLabels[0], left, height - 6);
+    ctx.fillText(xLabels[0], left, height - 5);
     const last = xLabels[xLabels.length - 1];
-    ctx.fillText(last, width - right - ctx.measureText(last).width, height - 6);
+    ctx.fillText(last, width - right - ctx.measureText(last).width, height - 5);
   }
 
   seriesList.forEach((series) => {
-    ctx.strokeStyle = series.color; ctx.lineWidth = 1.6; ctx.beginPath();
+    ctx.strokeStyle = series.color; ctx.lineWidth = 1.5; ctx.beginPath();
     let started = false;
     series.points.forEach((value, i) => {
       if (value === null || value === undefined) return;
@@ -256,15 +275,15 @@ function chart(canvas, seriesList, xLabels) {
   });
 }
 
-function renderLadder(book) {
+function renderLadder(book, mid) {
   const asks = (book.asks || []).slice().reverse(), bids = book.bids || [];
   const peak = Math.max(1, ...[...asks, ...bids].map((l) => l.quantity));
   const row = (level, side) => `<tr>
-      <td style="width:60%"><span class="bar" style="background:var(--${side});width:${(level.quantity / peak) * 100}%"></span>
+      <td style="width:58%"><span class="bar" style="background:var(--${side});width:${(level.quantity / peak) * 100}%"></span>
       <span class="${side}">${fmt(level.price, 0)}</span></td>
       <td class="num">${level.quantity.toLocaleString()}</td></tr>`;
   $("ladder").innerHTML = asks.map((l) => row(l, "sell")).join("")
-    + `<tr><td colspan="2" style="color:var(--muted);padding:6px">— mid ${fmt(latest?.telemetry?.last_mid, 1)} —</td></tr>`
+    + `<tr class="midrow"><td colspan="2">— mid ${fmt(mid, 1)} —</td></tr>`
     + bids.map((l) => row(l, "buy")).join("");
 }
 
@@ -277,47 +296,51 @@ function render(payload) {
   $("clock").textContent = telemetry?.simulation_time ? "sim " + telemetry.simulation_time : "—";
   if (!telemetry) return;
 
+  const counters = telemetry.counters || {};
+  $("chips").innerHTML = [
+    ["rows", counters.snapshots], ["orders", counters.orders],
+    ["fills", counters.executions], ["sim trades", counters.simulated_trades],
+  ].map(([label, value]) => `${label} <b>${(value || 0).toLocaleString()}</b>`).join("");
+
   const series = telemetry.series || [];
   const labels = series.map((p) => p.t);
+  const strategies = telemetry.strategies || [];
 
-  if ($("market").classList.contains("active")) {
+  if ($("live").classList.contains("active")) {
     chart($("priceChart"), [
       {color: "#4da3ff", points: series.map((p) => p.mid)},
       {color: "#ffc857", points: series.map((p) => p.last)},
     ], labels);
-    renderLadder(telemetry.book || {});
-    $("trades").innerHTML = (telemetry.trades || []).map((t) =>
-      `<tr><td>${t.t}</td><td class="${t.side.toLowerCase()}">${t.side}</td><td class="num">${fmt(t.price, 0)}</td><td class="num">${t.quantity}</td></tr>`).join("");
-    $("execs").innerHTML = (telemetry.executions || []).map((e) =>
-      `<tr><td>${e.t}</td><td>${e.order_id}</td><td class="${e.side.toLowerCase()}">${e.side}</td><td class="num">${fmt(e.price, 0)}</td><td class="num">${e.quantity}</td></tr>`).join("");
-  }
 
-  if ($("strategies").classList.contains("active")) {
-    const names = (telemetry.strategies || []).map((s) => s.strategy_id);
+    renderLadder(telemetry.book || {}, telemetry.last_mid);
+
+    const names = strategies.map((s) => s.strategy_id);
     chart($("pnlChart"), names.map((name, i) => ({
       color: PALETTE[i % PALETTE.length],
       points: series.map((p) => (p.pnl ? p.pnl[name] : null)),
     })), labels);
     $("pnlLegend").innerHTML = names.map((name, i) =>
       `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${name}</span>`).join("");
-    $("stratRows").innerHTML = (telemetry.strategies || []).map((s) => `<tr>
-        <td>${s.strategy_id}</td>
+
+    $("stratRows").innerHTML = strategies.map((s, i) => `<tr>
+        <td><span class="swatch" style="background:${PALETTE[i % PALETTE.length]}"></span>${s.strategy_id}</td>
         <td class="num ${signClass(s.position)}">${s.position}</td>
         <td class="num">${fmt(s.avg_cost, 1)}</td>
-        <td class="num ${signClass(s.realized_pnl)}">${fmt(s.realized_pnl)}</td>
-        <td class="num ${signClass(s.unrealized_pnl)}">${fmt(s.unrealized_pnl)}</td>
-        <td class="num ${signClass(s.total_pnl)}">${fmt(s.total_pnl)}</td>
+        <td class="num ${signClass(s.realized_pnl)}">${fmt(s.realized_pnl, 0)}</td>
+        <td class="num ${signClass(s.unrealized_pnl)}">${fmt(s.unrealized_pnl, 0)}</td>
+        <td class="num ${signClass(s.total_pnl)}">${fmt(s.total_pnl, 0)}</td>
         <td class="num">${s.live_orders}</td><td class="num">${s.orders}</td><td class="num">${s.fills}</td>
       </tr>`).join("");
-    $("orders").innerHTML = (telemetry.orders || []).map((o) => `<tr>
-        <td>${o.t}</td><td>${o.order_id}</td><td>${o.strategy_id}</td>
-        <td class="${o.side.toLowerCase()}">${o.side}</td>
-        <td class="num">${fmt(o.price, 0)}</td><td class="num">${o.quantity}</td>
-        <td class="num">${o.remaining}</td><td>${o.status}</td></tr>`).join("");
+
+    $("trades").innerHTML = (telemetry.trades || []).map((t) =>
+      `<tr><td>${t.t}</td><td class="${t.side.toLowerCase()}">${t.side}</td><td class="num">${fmt(t.price, 0)}</td><td class="num">${t.quantity}</td></tr>`).join("");
+    $("execs").innerHTML = (telemetry.executions || []).map((e) =>
+      `<tr><td>${e.t}</td><td>${e.order_id}</td><td class="${e.side.toLowerCase()}">${e.side}</td><td class="num">${fmt(e.price, 0)}</td><td class="num">${e.quantity}</td></tr>`).join("");
+    $("orders").innerHTML = (telemetry.orders || []).map((o) =>
+      `<tr><td>${o.t}</td><td>${o.strategy_id}</td><td class="${o.side.toLowerCase()}">${o.side}</td><td class="num">${fmt(o.price, 0)}</td><td class="num">${o.remaining}</td><td>${o.status}</td></tr>`).join("");
   }
 
   if ($("session").classList.contains("active")) {
-    const counters = telemetry.counters || {};
     $("counters").innerHTML = Object.entries(counters).map(([key, value]) =>
       `<div class="stat"><b>${value.toLocaleString()}</b><span>${key.replace(/_/g, " ")}</span></div>`).join("");
     $("components").innerHTML = (payload.components || []).map((c) => `<tr>
