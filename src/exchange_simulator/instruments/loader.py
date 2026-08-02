@@ -22,7 +22,7 @@ def load_instruments(path: Path | str | None = None) -> Dict[str, Instrument]:
     instruments: Dict[str, Instrument] = {}
 
     for instrument_dict in instrument_dicts:
-        instrument_dict['tick_size'] = Decimal(instrument_dict['tick_size'])
+        instrument_dict["tick_size"] = Decimal(str(instrument_dict["tick_size"]))
         instrument = Instrument(**instrument_dict)
 
         if instrument.instrument_id in instruments:
