@@ -96,11 +96,11 @@ as specified in [ADR 0003](decisions/0003-separate-trade-streams.md).
 
 ### Current recording implementation
 
-PR #22 provides CSV sinks for `ORDERS`, simulated `TRADES`, and
-`EXECUTION_REPORT`, and the controller allocates a new `runs/<run-id>/` directory
-for each launch. CSV rows are flushed immediately, and the recorder consumes
-messages already queued when shutdown is requested until its inbox is quiet for
-one receive timeout.
+The current implementation provides CSV sinks for `ORDERS`, simulated `TRADES`,
+and `EXECUTION_REPORT`, and the controller allocates a new `runs/<run-id>/`
+directory for each launch. CSV rows are flushed immediately, and the recorder
+consumes messages already queued when shutdown is requested until its inbox is
+quiet for one receive timeout.
 
 This is only part of the required output contract. No component currently
 publishes `ORDERS`, and run configuration, complete system logging, positions,

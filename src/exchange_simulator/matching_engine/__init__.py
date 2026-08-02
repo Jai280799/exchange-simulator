@@ -24,6 +24,7 @@ class BookOrder:
 class MutableBookLevel:
     price: Decimal
     quantity: int
+    level_index: int
 
 
 @dataclass(slots=True)

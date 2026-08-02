@@ -20,8 +20,8 @@ explicit interfaces after the baseline works end to end.
 | Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
 | Historical market-data feed | On `master` | Streams five-level snapshots and historical trade prints for one instrument. |
 | Matching engine and order book | On `master` | Initial architecture is merged; some behavioral policies remain open. |
-| System controller | Partial on `master` | Matching-engine and in-flight recorder wiring exist; the feed and other components are not yet integrated. |
-| Run recorder | In flight in PR #22 | Records order state, simulated trades, and execution reports as CSV artifacts; complete run orchestration remains integration work. |
+| System controller | Partial on `master` | Matching-engine and recorder wiring exist; the feed and other components are not yet integrated. |
+| Run recorder | On `master` | Records order state, simulated trades, and execution reports as CSV artifacts; complete run orchestration remains integration work. |
 | Trading platform and strategy | Not integrated | Their request, response, and execution-routing responsibilities must follow the contracts below. |
 
 ## Target component flow
@@ -170,6 +170,13 @@ The accepted MVP baseline uses two logical liquidity stores:
 The model deliberately ignores feedback from simulated trades into future
 historical snapshots. This keeps replay deterministic and aligns with the team's
 decision to prioritize a reliable demo.
+
+The matching implementation exposes an optional market-depth impact model for
+incoming aggressive orders that consume historical liquidity. The application
+controller continues to select `NoImpactModel` for the MVP. Every model must
+honor a limit order's price; if an adjusted market price would be worse than the
+limit, that level is not executable. Snapshot-triggered passive fills retain the
+resting order's price until the passive-fill policy is explicitly resolved.
 
 The following details are not yet accepted and must not be inferred from the
 merged matching-engine implementation:

@@ -22,13 +22,13 @@ consumer loop, and dummy-publisher example, see the
 |---|---|---|---|---|---|
 | `StateTopic.MARKET_DATA` | Historical feed | Matching engine, platform, market-data consumers | `MarketDataSnapshot` | Public market observation | On `master` |
 | `StateTopic.MARKET_TRADES` | Historical feed | Platform, strategies, future passive-fill/queue model | `MarketTradePrint` | Public historical observation | On `master` |
-| `StateTopic.TRADES` | Matching engine | Platform, run recorder, and public simulated-trade consumers | `Trade` | Public simulated event | On `master`; recorder subscription in PR #22 |
+| `StateTopic.TRADES` | Matching engine | Platform, run recorder, and public simulated-trade consumers | `Trade` | Public simulated event | On `master` |
 | `RequestTopic.CREATE_ORDER` | Trading platform | Matching engine | `CreateOrderRequest` | Trusted request | On `master` |
 | `ResponseTopic.CREATE_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
 | `RequestTopic.CANCEL_ORDER` | Trading platform | Matching engine | `CancelOrderRequest` | Trusted request | On `master`; ownership fields under review |
 | `ResponseTopic.CANCEL_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
-| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder | `ExecutionReport` | Trusted internal/private | On `master`; recorder subscription in PR #22; routing decision open |
-| `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers and run recorder | `Order` | Internal state | Reserved on `master`; recorder subscription in PR #22; producer ownership open |
+| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder | `ExecutionReport` | Trusted internal/private | On `master`; routing decision open |
+| `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers and run recorder | `Order` | Internal state | Reserved on `master`; producer ownership open |
 
 ## Schema expectations
 
@@ -88,6 +88,17 @@ Current contract:
 
 Limit orders require a price and all quantities must be positive.
 
+The MVP uses the source feedcodes `2603` and `2330` as canonical
+`instrument_id` values across market-data messages, order requests, instrument
+configuration, and matching-engine books. `config/instruments.yaml` supplies the
+MIC, currency, tick size, and lot size for each ID. Request quantities must be a
+multiple of the configured lot size, and any supplied price must be a multiple
+of the configured tick size. For incoming aggressive orders, an optional impact
+model may reject an otherwise visible market level when its adjusted execution
+price would violate the order's limit; the default MVP runtime remains
+no-impact. Snapshot-triggered passive fills continue to use the resting order's
+price while that separate policy remains open.
+
 ### `CancelOrderRequest`
 
 `master` uses only globally unique `order_id` plus `timestamp`.
@@ -108,7 +119,7 @@ Responses must be published on `ResponseTopic`, never the corresponding
 
 ## Recording contract
 
-PR #22 introduces a trusted internal run recorder with these CSV mappings:
+The trusted internal run recorder uses these CSV mappings:
 
 - `ORDERS` -> `orders.csv`;
 - `TRADES` -> `simulated-trades.csv`;

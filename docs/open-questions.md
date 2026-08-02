@@ -80,7 +80,7 @@ is finite while consumers wait on queues. Define:
 - timeout and failure behavior;
 - when artifact writers flush and close.
 
-PR #22 gives the run recorder an interim local rule: after shutdown is requested,
+The run recorder uses an interim local rule: after shutdown is requested,
 it consumes queued messages until its inbox is quiet for one receive timeout and
 then closes its sinks. This does not resolve system-wide completion. The
 controller must still define when producers are finished, whether a quiet inbox
