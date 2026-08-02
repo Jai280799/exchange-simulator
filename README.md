@@ -35,3 +35,29 @@ conda activate exchange-simulator
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
+
+## Running the demo
+
+Put a historical tick file under `var/` (gitignored), then:
+
+```bash
+pip install -e .
+python -m exchange_simulator          # dashboard on http://127.0.0.1:8000
+```
+
+Open the dashboard and press **Start**. The controller launches the feed,
+matching engine, trading platform, one process per strategy, and the run
+recorder, waits for every component to report ready, then replays. The
+**Market**, **Strategies**, and **Session** tabs show the book, per-strategy
+inventory and PnL, and component health while the run proceeds.
+
+Each run writes `runs/<run-id>/` containing `run-config.json`, `system.log`,
+`orders.csv`, `executions.csv`, `simulated-trades.csv`, and `summary.json`.
+
+Without an editable install, prefix commands with `PYTHONPATH=src`.
+
+## Tests
+
+```bash
+pytest
+```

@@ -63,12 +63,12 @@ def _write_crossing_snapshot(path: str) -> None:
         {
             "date": "2021-08-02",
             "time": "90000000",
-            "lastPx": "100.0",
+            "lastPx": "13300",
             "size": "25",
             "volume": "25",
-            "SP1": "101.0",
+            "SP1": "13350",
             "SV1": "100",
-            "BP1": "100.0",
+            "BP1": "13300",
             "BV1": "100",
         }
     )
@@ -121,7 +121,7 @@ def test_real_feed_snapshot_reaches_matching_engine_and_triggers_fill(tmp_path):
         side=Side.BUY,
         order_type=OrderType.LIMIT,
         quantity=100,
-        price=Decimal("102"),
+        price=Decimal("13400"),
         timestamp=dt.datetime(2021, 8, 2, 9, 0),
     )
 

@@ -14,7 +14,7 @@ row the snapshot is emitted before its trade print. No I/O or bus dependency her
 so the reconstruction logic is unit-testable in isolation.
 """
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Iterable, Iterator, Mapping, Tuple, Union
 import datetime as dt
 import logging
@@ -40,6 +40,16 @@ def _is_blank(value: object) -> bool:
         return True
     text = str(value).strip()
     return text == "" or text.lower() == "nan"
+
+
+def _is_absent_level(value: object) -> bool:
+    """The source marks an absent book level with 0, never a blank cell."""
+    if _is_blank(value):
+        return True
+    try:
+        return Decimal(str(value).strip()) == 0
+    except InvalidOperation:
+        return False
 
 
 def parse_timestamp(date_str: str, time_value: str) -> dt.datetime:
@@ -74,7 +84,7 @@ def _parse_levels(
     for price_col, size_col in zip(price_cols, size_cols):
         price = row.get(price_col)
         size = row.get(size_col)
-        if _is_blank(price) or _is_blank(size):
+        if _is_absent_level(price) or _is_absent_level(size):
             continue
         levels.append(
             BookLevel(price=Decimal(str(price).strip()), quantity=int(float(str(size).strip())))

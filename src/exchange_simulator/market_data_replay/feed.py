@@ -125,12 +125,10 @@ def run_historical_market_data_feed_component(
     instrument_id: str,
     date: Optional[str] = None,
     replay_interval_seconds: float = 0.0,
+    ready_event: Optional[EventLike] = None,
 ) -> int:
     """Run the feed behind the same lifecycle events as other components."""
     configure_logging()
-    _logger.info("Historical market-data feed component is waiting to start")
-    start_event.wait()
-
     feed = HistoricalMarketDataFeed(
         bus=bus,
         data_path=data_path,
@@ -138,4 +136,10 @@ def run_historical_market_data_feed_component(
         date=date,
         replay_interval_seconds=replay_interval_seconds,
     )
+
+    if ready_event is not None:
+        ready_event.set()
+
+    _logger.info("Historical market-data feed component is waiting to start")
+    start_event.wait()
     return feed.run(shutdown_event=shutdown_event)

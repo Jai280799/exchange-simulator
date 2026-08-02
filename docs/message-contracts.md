@@ -27,8 +27,10 @@ consumer loop, and dummy-publisher example, see the
 | `ResponseTopic.CREATE_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
 | `RequestTopic.CANCEL_ORDER` | Trading platform | Matching engine | `CancelOrderRequest` | Trusted request | On `master`; ownership fields under review |
 | `ResponseTopic.CANCEL_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
-| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder | `ExecutionReport` | Trusted internal/private | On `master`; routing decision open |
-| `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers and run recorder | `Order` | Internal state | Reserved on `master`; producer ownership open |
+| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder; dashboard | `ExecutionReport` | Trusted internal/private | Routing resolved by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
+| `StateTopic.ORDERS` | Trading platform | Run recorder, dashboard | `Order` | Internal state | Producer assigned by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
+| `RequestTopic.STRATEGY_INTENT` | Strategy processes | Trading platform | `StrategyIntent` | Untrusted request | Added by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
+| `StateTopic.STRATEGY_UPDATE` | Trading platform | Strategy processes, dashboard | `StrategyUpdate` | Addressed broadcast | Added by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
 
 ## Schema expectations
 
@@ -142,9 +144,34 @@ The implemented contract represents a fill for one order and contains:
 - `quantity`;
 - `timestamp`.
 
-The platform must be able to route it to exactly the owning strategy, either
-through a future explicit recipient field or a platform-owned order-to-strategy
-mapping.
+The platform routes it to the owning strategy through its platform-owned
+order-to-strategy mapping. No recipient field was added to this schema.
+
+### `StrategyIntent`
+
+Strategy processes publish intent; only the trading platform turns it into an
+order request. Fields:
+
+- `strategy_id`, `instrument_id`, `action` (`SUBMIT` or `CANCEL`), `timestamp`;
+- for `SUBMIT`: `side`, `order_type`, `quantity`, optional `price`;
+- for `CANCEL`: `order_id`.
+
+The platform assigns the `order_id`, rounds the price to the instrument tick
+(down for buys, up for sells), truncates the quantity to whole lots, and rejects
+a cancellation of an order the strategy does not own.
+
+### `StrategyUpdate`
+
+The platform-owned view returned to exactly one strategy:
+
+- `strategy_id` — **the recipient**, not the sender;
+- `timestamp`, `position`, `avg_cost`, `realized_pnl`, `unrealized_pnl`;
+- `live_orders`;
+- optional `response` and `execution` that triggered the update.
+
+The topic is a broadcast. Every strategy receives every update and must discard
+those whose `strategy_id` is not its own. See
+[ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md).
 
 ## Provenance and ordering
 

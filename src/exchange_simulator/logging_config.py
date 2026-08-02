@@ -1,6 +1,9 @@
 import logging
+import os
 import sys
 from datetime import datetime
+
+LOG_FILE_ENV = "EXCHANGE_SIMULATOR_LOG_FILE"
 
 
 class LocalTZFormatter(logging.Formatter):
@@ -15,6 +18,15 @@ class LocalTZFormatter(logging.Formatter):
 
 def configure_logging(level: int = logging.INFO) -> None:
     fmt = "%(asctime)s [%(thread_label)s|p%(process)d] [%(levelname)-5s] %(name)s - %(message)s"
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(LocalTZFormatter(fmt))
-    logging.basicConfig(level=level, handlers=[handler], force=True)
+    formatter = LocalTZFormatter(fmt)
+
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
+    log_file = os.environ.get(LOG_FILE_ENV)
+    if log_file:
+        handlers.append(logging.FileHandler(log_file, mode="a"))
+
+    for handler in handlers:
+        handler.setFormatter(formatter)
+
+    logging.basicConfig(level=level, handlers=handlers, force=True)

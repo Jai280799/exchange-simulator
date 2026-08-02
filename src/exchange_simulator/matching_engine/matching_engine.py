@@ -23,14 +23,15 @@ _logger = logging.getLogger(__name__)
 
 class MatchingEngine:
 
-    def __init__(self, market_impact_model: MarketImpactModel, bus: ComponentMessageBus):
+    def __init__(self, market_impact_model: MarketImpactModel, bus: ComponentMessageBus,
+                 instruments: Optional[Dict[str, Instrument]] = None):
         self._market_impact_model: MarketImpactModel = market_impact_model
         self._bus: ComponentMessageBus = bus
         self._order_book_cache: Dict[str, OrderBook] = {}
         self._live_order_cache: Dict[str, BookOrder] = {}
         self._order_id_cache: Set[str] = set()
 
-        self._instruments: Dict[str, Instrument] = load_instruments()
+        self._instruments: Dict[str, Instrument] = load_instruments() if instruments is None else instruments
 
     def run(self, start_event: Event, shutdown_event: Event) -> None:
         _logger.info("Matching Engine component is starting...")
@@ -181,8 +182,11 @@ class MatchingEngine:
         self._bus.publish(StateTopic.EXECUTION_REPORT, execution_report)
 
 
-def run_matching_engine_component(bus: ComponentMessageBus, start_event: Event, shutdown_event: Event, market_impact_model: Optional[MarketImpactModel] = None) -> None:
+def run_matching_engine_component(bus: ComponentMessageBus, start_event: Event, shutdown_event: Event, market_impact_model: Optional[MarketImpactModel] = None, ready_event: Optional[Event] = None) -> None:
     configure_logging()
     if market_impact_model is None:
         market_impact_model = NoImpactModel()
-    MatchingEngine(market_impact_model, bus).run(start_event, shutdown_event)
+    engine = MatchingEngine(market_impact_model, bus)
+    if ready_event is not None:
+        ready_event.set()
+    engine.run(start_event, shutdown_event)

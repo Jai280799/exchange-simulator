@@ -9,6 +9,7 @@ from exchange_simulator.schemas.order import (
     Order,
     OrderResponse,
 )
+from exchange_simulator.schemas.strategy import StrategyIntent, StrategyUpdate
 
 
 MESSAGE_TYPES: Dict[Topic, Type[Any]] = {
@@ -17,8 +18,10 @@ MESSAGE_TYPES: Dict[Topic, Type[Any]] = {
     StateTopic.MARKET_DATA: MarketDataSnapshot,
     StateTopic.MARKET_TRADES: MarketTradePrint,
     StateTopic.EXECUTION_REPORT: ExecutionReport,
+    StateTopic.STRATEGY_UPDATE: StrategyUpdate,
     RequestTopic.CREATE_ORDER: CreateOrderRequest,
     RequestTopic.CANCEL_ORDER: CancelOrderRequest,
+    RequestTopic.STRATEGY_INTENT: StrategyIntent,
     ResponseTopic.CREATE_ORDER: OrderResponse,
     ResponseTopic.CANCEL_ORDER: OrderResponse,
 }

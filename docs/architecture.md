@@ -18,11 +18,13 @@ explicit interfaces after the baseline works end to end.
 | Area | Status | Notes |
 |---|---|---|
 | Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
-| Historical market-data feed | On `master`; lifecycle extension in this change | Streams five-level snapshots and historical trade prints for one instrument; this change adds fixed-interval pacing and a stoppable component runner. |
-| Matching engine and order book | On `master` | Initial architecture is merged; some behavioral policies remain open. |
-| System controller | Partial on `master` | Matching-engine and recorder wiring exist; the feed and other components are not yet integrated. |
-| Run recorder | On `master` | Records order state, simulated trades, and execution reports as CSV artifacts; complete run orchestration remains integration work. |
-| Trading platform and strategy | Not integrated | Their request, response, and execution-routing responsibilities must follow the contracts below. |
+| Historical market-data feed | On `master` | Streams five-level snapshots and historical trade prints for one instrument, with fixed-interval pacing and a stoppable component runner. |
+| Matching engine and order book | On `master` | Q1 and Q3 behavioural policies remain open. |
+| System controller | Integrated | Full topology, readiness barrier, end-of-stream detection, drain, failure detection, and run artifacts. See [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md). |
+| Run recorder | Integrated | Writes `orders.csv`, `simulated-trades.csv`, and `executions.csv`; `ORDERS` now has a producer. |
+| Trading platform | Integrated | Trusted gateway: owns order-to-strategy mapping, tick/lot conformance, portfolios, and the `ORDERS` stream. |
+| Strategies | Integrated | Momentum, mean-reversion, RSI, and market-maker demo strategies, one process each. See [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md). |
+| Dashboard | Integrated | FastAPI page with live price chart, order book, per-strategy inventory and PnL, and component health. |
 
 ## Target component flow
 

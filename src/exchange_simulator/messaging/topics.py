@@ -8,11 +8,13 @@ class StateTopic(StrEnum):
     MARKET_DATA = "market_data"
     EXECUTION_REPORT = "execution_report"
     MARKET_TRADES = "market_trades"
+    STRATEGY_UPDATE = "strategy_update"
 
 
 class RequestTopic(StrEnum):
     CREATE_ORDER = "create_order_request"
     CANCEL_ORDER = "cancel_order_request"
+    STRATEGY_INTENT = "strategy_intent_request"
 
 
 class ResponseTopic(StrEnum):

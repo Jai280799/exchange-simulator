@@ -1,13 +1,13 @@
 instruments:
   - instrument_id: "2603"
-    mic: "XHKG"
+    mic: "XTAI"
     feedcode: "2603"
-    trading_currency_id: "HKD"
-    tick_size: "0.01"
-    lot_size: 100
+    trading_currency_id: "TWD"
+    tick_size: "50"
+    lot_size: 1
   - instrument_id: "2330"
-    mic: "XHKG"
+    mic: "XTAI"
     feedcode: "2330"
-    trading_currency_id: "HKD"
-    tick_size: "0.01"
-    lot_size: 100
+    trading_currency_id: "TWD"
+    tick_size: "100"
+    lot_size: 1
