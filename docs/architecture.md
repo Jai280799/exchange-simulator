@@ -1,7 +1,7 @@
 # Exchange simulator architecture
 
-Status: **Accepted baseline with incomplete integration**
-Last updated: **2026-08-02**
+Status: **Accepted baseline; end-to-end integration in flight (PR #28)**
+Last updated: **2026-08-03**
 
 ## Purpose
 
@@ -20,11 +20,11 @@ explicit interfaces after the baseline works end to end.
 | Schemas and multiprocessing message bus | On `master` | Topic permissions, type validation, component registration, and topology finalization exist. |
 | Historical market-data feed | On `master` | Streams five-level snapshots and historical trade prints for one instrument, with fixed-interval pacing and a stoppable component runner. |
 | Matching engine and order book | On `master` | Q1 and Q3 behavioural policies remain open. |
-| System controller | Integrated | Full topology, readiness barrier, end-of-stream detection, drain, failure detection, and run artifacts. See [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md). |
-| Run recorder | Integrated | Writes `orders.csv`, `simulated-trades.csv`, and `executions.csv`; `ORDERS` now has a producer. |
-| Trading platform | Integrated | Trusted gateway: owns order-to-strategy mapping, tick/lot conformance, portfolios, and the `ORDERS` stream. |
-| Strategies | Integrated | Momentum, mean-reversion, RSI, and market-maker demo strategies, one process each. See [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md). |
-| Dashboard | Integrated | FastAPI page with live price chart, order book, per-strategy inventory and PnL, and component health. |
+| System controller | In flight (PR #28) | Full topology, readiness barrier, end-of-stream detection, drain, failure detection, and run artifacts. See [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md). |
+| Run recorder | In flight (PR #28) | Writes `orders.csv`, `simulated-trades.csv`, and `executions.csv`; `ORDERS` now has a producer. |
+| Trading platform | In flight (PR #28) | Trusted gateway: owns order-to-strategy mapping, tick/lot conformance, portfolios, and the `ORDERS` stream. |
+| Strategies | In flight (PR #28) | Momentum, mean-reversion, RSI, and market-maker demo strategies, one process each. See [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md). |
+| Dashboard | In flight (PR #28) | FastAPI page with live price chart, order book, per-strategy inventory and PnL, and component health. |
 
 ## Target component flow
 
@@ -45,14 +45,14 @@ flowchart LR
 
     FEED -- MARKET_DATA<br/>historical snapshots --> ENGINE
     FEED -- MARKET_DATA / MARKET_TRADES<br/>market observations --> PLATFORM
-    STRATEGY -- order intent --> PLATFORM
+    FEED -- MARKET_DATA / MARKET_TRADES --> STRATEGY
+    STRATEGY -- STRATEGY_INTENT --> PLATFORM
     PLATFORM -- CREATE_ORDER / CANCEL_ORDER --> ENGINE
     ENGINE -- create/cancel responses --> PLATFORM
-    ENGINE -- TRADES<br/>simulated public trades --> PLATFORM
     ENGINE -- EXECUTION_REPORT<br/>private execution result --> PLATFORM
     ENGINE -- TRADES / EXECUTION_REPORT --> RECORDER
-    PLATFORM -. ORDERS<br/>producer decision open .-> RECORDER
-    PLATFORM -- acknowledgements / fills --> STRATEGY
+    PLATFORM -- ORDERS --> RECORDER
+    PLATFORM -- STRATEGY_UPDATE<br/>position, PnL, live orders --> STRATEGY
 ```
 
 The diagram shows logical ownership. Physical processes and exact subscriptions
@@ -76,8 +76,8 @@ are declared centrally through `ComponentSpec` objects.
 - Publish historical `MarketTradePrint` messages reconstructed from source data.
 - Preserve historical data as fixed ground truth.
 - Never alter future historical messages because of simulated strategy trades.
-- Signal completion through the system lifecycle protocol once that protocol is
-  defined.
+- Signal completion by exiting: the feed process terminating is end of stream,
+  per [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md).
 
 ### Matching engine
 
@@ -97,8 +97,11 @@ are declared centrally through `ComponentSpec` objects.
 - Correlate responses and execution reports with the originating strategy.
 - Maintain positions, cash, and order state when those modules are implemented.
 
-Whether cancellation authorization and execution-report routing live exclusively
-here remains an explicit open contract question.
+Cancellation authorization and execution-report routing live exclusively here.
+Strategies publish `RequestTopic.STRATEGY_INTENT`; only the platform may turn an
+intent into a create or cancel request, and it verifies that a strategy owns an
+order before forwarding a cancellation. Settled by
+[ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md).
 
 ### Strategy
 
@@ -117,8 +120,8 @@ here remains an explicit open contract question.
 - Leave run identifiers, output-root configuration, producer shutdown ordering,
   and final summaries to the system controller.
 
-The producer and ownership contract for `ORDERS` remains open. Until a component
-publishes that topic, the recorder cannot produce `orders.csv`.
+The trading platform is the `ORDERS` producer, so `orders.csv` is written. See
+[ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md).
 
 ## Accepted invariants
 

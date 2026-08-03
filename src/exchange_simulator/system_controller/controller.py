@@ -68,6 +68,9 @@ class SessionController:
         self._topology: Optional[MultiprocessingMessageBusTopology] = None
         self._start_event: Any = None
         self._shutdown_event: Any = None
+        # Stopping the producer and draining the consumers are separate acts:
+        # the matching engine exits on shutdown without draining its inbox.
+        self._feed_stop_event: Any = None
         self._stop_requested = threading.Event()
         self._telemetry: Optional[TelemetryHub] = None
         self._supervisor: Optional[threading.Thread] = None
@@ -104,6 +107,25 @@ class SessionController:
             _logger.info("Stop requested by operator")
             self._stop_requested.set()
 
+    def shutdown(self, timeout: float = 20.0) -> None:
+        """Stop any running session and wait for children. Safe to call twice."""
+        with self._lock:
+            idle = self._state not in _ACTIVE_STATES and not self._processes
+        if idle:
+            return
+
+        _logger.info("Shutting down the controller")
+        self.stop()
+
+        supervisor = self._supervisor
+        if supervisor is not None and supervisor.is_alive():
+            supervisor.join(timeout)
+
+        self._shutdown_children()
+        telemetry = self._telemetry
+        if telemetry is not None:
+            telemetry.stop()
+
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
             payload: Dict[str, Any] = {
@@ -131,6 +153,7 @@ class SessionController:
         self._processes = {}
         self._ready_events = {}
         self._terminated = set()
+        self._feed_stop_event = None
         self._stop_requested = threading.Event()
         self._started_at = None
         self._finished_at = None
@@ -169,6 +192,7 @@ class SessionController:
 
         self._start_event = mp.Event()
         self._shutdown_event = mp.Event()
+        self._feed_stop_event = mp.Event()
 
         processes: Dict[str, mp.Process] = {
             Component.MARKET_DATA_FEED: mp.Process(
@@ -177,7 +201,7 @@ class SessionController:
                 args=(
                     topology.create_component_bus(Component.MARKET_DATA_FEED),
                     self._start_event,
-                    self._shutdown_event,
+                    self._feed_stop_event,
                     str(data_path),
                     config.instrument_id,
                     config.date,
@@ -241,10 +265,13 @@ class SessionController:
             )
 
         telemetry = TelemetryHub(topology.create_component_bus(Component.DASHBOARD), strategy_ids)
-        telemetry.start()
 
+        # Spawn before starting the telemetry thread: under a fork start method
+        # a live thread in the parent can deadlock the child. Nothing publishes
+        # until start_event, so the inbox cannot miss messages.
         for process in processes.values():
             process.start()
+        telemetry.start()
 
         with self._lock:
             self._config = config
@@ -306,10 +333,22 @@ class SessionController:
         return True
 
     def _await_replay_end(self) -> None:
+        """Return once the feed has stopped producing, however that happened.
+
+        Draining can only converge with the producer dead, so an operator stop
+        halts and joins the feed here rather than leaving it running.
+        """
         feed = self._processes[Component.MARKET_DATA_FEED]
         while feed.is_alive():
             if self._stop_requested.is_set():
-                _logger.info("Replay interrupted by operator")
+                _logger.info("Replay interrupted by operator; stopping the feed")
+                self._feed_stop_event.set()
+                feed.join(timeout=self.JOIN_TIMEOUT_SECONDS)
+                if feed.is_alive():
+                    _logger.warning("Feed did not stop; terminating")
+                    self._terminated.add(Component.MARKET_DATA_FEED)
+                    feed.terminate()
+                    feed.join(timeout=5.0)
                 return
             crashed = self._failed_components()
             if crashed:
@@ -343,6 +382,8 @@ class SessionController:
                 process.join(timeout=5.0)
 
     def _shutdown_children(self) -> None:
+        if self._feed_stop_event is not None:
+            self._feed_stop_event.set()
         if self._shutdown_event is not None:
             self._shutdown_event.set()
         if self._start_event is not None:

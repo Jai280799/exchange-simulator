@@ -3,8 +3,9 @@
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -48,10 +49,18 @@ def create_app(
 ) -> FastAPI:
     session = controller if controller is not None else SessionController()
     guard = auth_dependency if auth_dependency is not None else build_auth_dependency()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        # Interrupting uvicorn must not orphan component processes.
+        await asyncio.to_thread(session.shutdown)
+
     app = FastAPI(
         title="Exchange Simulator",
         version="1.0",
         dependencies=[Depends(guard)],
+        lifespan=lifespan,
     )
     app.state.controller = session
 
