@@ -7,6 +7,8 @@ Accepted records:
 3. [Separate historical and simulated trade streams](0003-separate-trade-streams.md)
 4. [Centralize component topology](0004-centralized-component-topology.md)
 5. [Provide a one-command observable demo runtime](0005-one-command-demo-runtime.md)
+6. [One process per strategy behind an intent channel](0006-strategy-processes-and-intent-channel.md)
+7. [Session lifecycle and web-driven demo control](0007-session-lifecycle-and-web-control.md)
 
 New records should use the next number and either supersede or link any earlier
 decision they change.

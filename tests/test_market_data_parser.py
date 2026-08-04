@@ -71,3 +71,18 @@ def test_quantity_uses_volume_delta_not_size_field():
     ]
     trades = [m for m in iter_messages(rows, instrument_id="2603") if isinstance(m, MarketTradePrint)]
     assert trades[1].quantity == 75
+
+
+def test_zero_priced_level_is_absent_not_a_level_at_zero():
+    # The source marks an empty level with 0, never a blank cell.
+    rows = [_row("90000000", "0", bp1="0.0")]
+    snapshot = next(iter(iter_messages(rows, instrument_id="2603")))
+    assert snapshot.bids[0].price == Decimal("99.0")
+    assert len(snapshot.bids) == 4
+
+
+def test_zero_sized_level_is_absent():
+    row = _row("90000000", "0")
+    row["SV1"] = "0"
+    snapshot = next(iter(iter_messages([row], instrument_id="2603")))
+    assert snapshot.asks[0].price == Decimal("102.0")

@@ -1,6 +1,6 @@
 # Demo runbook
 
-Status: **Required target; not fully implemented**
+Status: **Implemented in flight (PR #28), except `positions.csv`**
 Last updated: **2026-08-01**
 
 ## Objective
@@ -102,10 +102,17 @@ directory for each launch. CSV rows are flushed immediately, and the recorder
 consumes messages already queued when shutdown is requested until its inbox is
 quiet for one receive timeout.
 
-This is only part of the required output contract. No component currently
-publishes `ORDERS`, and run configuration, complete system logging, positions,
-and `summary.json` are not implemented. Producer completion ordering and final
-drain acknowledgement remain integration work.
+In flight in PR #28: the trading platform is now the `ORDERS` producer, so
+`orders.csv` is written; the controller writes `run-config.json`, `system.log`
+and `summary.json`; and completion ordering is defined by
+[ADR 0007](decisions/0007-session-lifecycle-and-web-control.md) — the feed
+process exiting is end of stream, after which consumers drain until their
+message counts stop moving.
+
+`positions.csv` is the one artifact still unimplemented; per-strategy inventory
+and PnL are live on the dashboard and in `summary.json` but are not written as a
+separate file. An explicit recorder completion acknowledgement also remains
+open — a quiet inbox is inferred, not confirmed.
 
 ## Pre-presentation checklist
 

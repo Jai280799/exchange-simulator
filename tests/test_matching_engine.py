@@ -15,6 +15,7 @@ from exchange_simulator.messaging.message_bus import ComponentMessageBus
 from exchange_simulator.messaging.multiprocessing_bus import MultiprocessingMessageBusTopology
 from exchange_simulator.messaging.topics import RequestTopic, ResponseTopic, StateTopic, Topic
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType, Side
+from exchange_simulator.schemas.instrument import Instrument
 from exchange_simulator.schemas.market_data import BookLevel, MarketDataSnapshot
 from exchange_simulator.schemas.order import CreateOrderRequest, OrderResponse
 from exchange_simulator.system_controller import Component
@@ -34,9 +35,20 @@ class FakeMessageBus(ComponentMessageBus):
         raise NotImplementedError
 
 
+TEST_INSTRUMENT = Instrument(
+    instrument_id=INSTRUMENT_ID,
+    mic="XTAI",
+    feedcode=INSTRUMENT_ID,
+    trading_currency_id="TWD",
+    tick_size=Decimal("0.01"),
+    lot_size=100,
+)
+
+
 @pytest.fixture
 def matching_engine() -> MatchingEngine:
-    return MatchingEngine(NoImpactModel(), FakeMessageBus())
+    """Unit tests price against a fixture instrument, not the shipped config."""
+    return MatchingEngine(NoImpactModel(), FakeMessageBus(), {INSTRUMENT_ID: TEST_INSTRUMENT})
 
 
 def build_test_client_component_spec() -> ComponentSpec:

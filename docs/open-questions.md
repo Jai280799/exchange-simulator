@@ -11,9 +11,9 @@ request does not settle them.
 | Priority | Question | Why it matters | Suggested owner | Needed before |
 |---|---|---|---|---|
 | 1 | How is the best executable price selected across strategy and historical liquidity? | Determines the matching abstraction and whether participant-first execution may give a worse price. | Jai + team | Final matching behavior |
-| 2 | Where are cancellation ownership and execution-report routing enforced? | Defines the platform/engine trust boundary and public schemas Alex builds against. | Alex + Jai | Platform integration |
+| ~~2~~ | ~~Where are cancellation ownership and execution-report routing enforced?~~ | **Resolved** by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md): enforced in the trading platform. | Alex + Jai | — |
 | 3 | What price fills a resting strategy order when a later snapshot touches/crosses it? | Changes P&L and passive-fill realism. | Jai + team | Passive-fill tests |
-| 4 | How is end-of-stream and shutdown coordinated? | Clean shutdown is required, but the mechanism remains open. | Integration owner | Demo entry point |
+| ~~4~~ | ~~How is end-of-stream and shutdown coordinated?~~ | **Resolved** by [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md): feed process exit is end of stream; drain on quiet counters. | Integration owner | — |
 | 5 | What replay pace and dataset should the demo use? | The system must stay observable throughout the presentation without overwhelming consumers. | Hyungmin + team | Full demo rehearsal |
 | 6 | How are multiple instruments scheduled? | Determines whether feeds run independently or merge onto one event timeline. | Hyungmin | Multi-instrument milestone |
 | 7 | Is a reconstructed single-book/market-impact model in scope? | Higher realism, but substantial heuristic complexity and demo risk. | Team/professor | Post-MVP planning |
@@ -37,7 +37,12 @@ Options:
 Recommended next step: decide the policy and add a two-source example as an
 acceptance test. Do not hide the decision inside method call order.
 
-## Q2: trusted gateway and private routing
+## Q2: trusted gateway and private routing — RESOLVED
+
+Settled by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md).
+The proposed simple model below was adopted as written, with one addition:
+strategies run as separate processes and reach the platform over
+`RequestTopic.STRATEGY_INTENT` rather than calling it directly.
 
 Proposed simple model:
 
@@ -67,7 +72,14 @@ Options:
 The current two-book MVP can choose option 1 or 2. Option 3 belongs to a
 trade-driven passive-fill model and requires additional queue assumptions.
 
-## Q4: completion and shutdown coordination
+## Q4: completion and shutdown coordination — RESOLVED
+
+Settled by [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md). The
+feed process exiting is end of stream; the controller then waits for message
+counters to stop moving before requesting shutdown. The recorder's interim
+quiet-inbox rule described below is now the second half of that protocol rather
+than a local workaround. The remaining gap is an explicit recorder completion
+acknowledgement.
 
 Clean shutdown is required by
 [ADR 0005](decisions/0005-one-command-demo-runtime.md), but the historical feed

@@ -1,5 +1,19 @@
 from enum import StrEnum
 
+
 class Component(StrEnum):
+    MARKET_DATA_FEED = "MARKET_DATA_FEED"
     MATCHING_ENGINE = "MATCHING_ENGINE"
+    TRADING_PLATFORM = "TRADING_PLATFORM"
     RUN_RECORDER = "RUN_RECORDER"
+    DASHBOARD = "DASHBOARD"
+
+
+class SessionState(StrEnum):
+    IDLE = "IDLE"
+    STARTING = "STARTING"
+    READY = "READY"
+    RUNNING = "RUNNING"
+    DRAINING = "DRAINING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"

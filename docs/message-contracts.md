@@ -1,7 +1,7 @@
 # Message contracts
 
-Status: **Baseline contract; integration remains incomplete**
-Last updated: **2026-08-02**
+Status: **Baseline contract; strategy channel in flight (PR #28)**
+Last updated: **2026-08-03**
 
 ## Rules
 
@@ -25,10 +25,12 @@ consumer loop, and dummy-publisher example, see the
 | `StateTopic.TRADES` | Matching engine | Platform, run recorder, and public simulated-trade consumers | `Trade` | Public simulated event | On `master` |
 | `RequestTopic.CREATE_ORDER` | Trading platform | Matching engine | `CreateOrderRequest` | Trusted request | On `master` |
 | `ResponseTopic.CREATE_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
-| `RequestTopic.CANCEL_ORDER` | Trading platform | Matching engine | `CancelOrderRequest` | Trusted request | On `master`; ownership fields under review |
+| `RequestTopic.CANCEL_ORDER` | Trading platform | Matching engine | `CancelOrderRequest` | Trusted request | On `master`; ownership enforced by the platform per [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
 | `ResponseTopic.CANCEL_ORDER` | Matching engine | Trading platform | `OrderResponse` | Correlated response | On `master` |
-| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder | `ExecutionReport` | Trusted internal/private | On `master`; routing decision open |
-| `StateTopic.ORDERS` | Not yet assigned | Platform/order-state consumers and run recorder | `Order` | Internal state | Reserved on `master`; producer ownership open |
+| `StateTopic.EXECUTION_REPORT` | Matching engine | Trading platform, which routes to the owner; trusted run recorder; dashboard | `ExecutionReport` | Trusted internal/private | In flight (PR #28); routing resolved by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
+| `StateTopic.ORDERS` | Trading platform | Run recorder, dashboard | `Order` | Internal state | In flight (PR #28); producer assigned by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
+| `RequestTopic.STRATEGY_INTENT` | Strategy processes | Trading platform | `StrategyIntent` | Untrusted request | In flight (PR #28), added by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
+| `StateTopic.STRATEGY_UPDATE` | Trading platform | Strategy processes, dashboard | `StrategyUpdate` | Addressed broadcast | In flight (PR #28), added by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md) |
 
 ## Schema expectations
 
@@ -103,9 +105,9 @@ price while that separate policy remains open.
 
 `master` uses only globally unique `order_id` plus `timestamp`.
 
-The simplified form is acceptable if the trading platform is the sole trusted
-publisher and validates strategy ownership before forwarding. This trust boundary
-is still **Open** and is tracked in `open-questions.md`.
+The simplified form holds because the trading platform is the sole trusted
+publisher and validates strategy ownership before forwarding. That trust boundary
+is settled by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md).
 
 ### `OrderResponse`
 
@@ -126,9 +128,11 @@ The trusted internal run recorder uses these CSV mappings:
 - `EXECUTION_REPORT` -> `executions.csv`.
 
 The recorder flushes after each row and drains messages already in its inbox
-after shutdown is requested. The controller still owns producer shutdown order,
-run completion, and the run-specific output directory. `orders.csv` remains
-unavailable until the open `ORDERS` producer decision is resolved.
+after shutdown is requested. The controller owns producer shutdown order, run
+completion, and the run-specific output directory; it stops the feed before
+draining consumers, per
+[ADR 0007](decisions/0007-session-lifecycle-and-web-control.md). All three files
+are written now that the platform produces `ORDERS`.
 
 ### `ExecutionReport`
 
@@ -142,9 +146,34 @@ The implemented contract represents a fill for one order and contains:
 - `quantity`;
 - `timestamp`.
 
-The platform must be able to route it to exactly the owning strategy, either
-through a future explicit recipient field or a platform-owned order-to-strategy
-mapping.
+The platform routes it to the owning strategy through its platform-owned
+order-to-strategy mapping. No recipient field was added to this schema.
+
+### `StrategyIntent`
+
+Strategy processes publish intent; only the trading platform turns it into an
+order request. Fields:
+
+- `strategy_id`, `instrument_id`, `action` (`SUBMIT` or `CANCEL`), `timestamp`;
+- for `SUBMIT`: `side`, `order_type`, `quantity`, optional `price`;
+- for `CANCEL`: `order_id`.
+
+The platform assigns the `order_id`, rounds the price to the instrument tick
+(down for buys, up for sells), truncates the quantity to whole lots, and rejects
+a cancellation of an order the strategy does not own.
+
+### `StrategyUpdate`
+
+The platform-owned view returned to exactly one strategy:
+
+- `strategy_id` — **the recipient**, not the sender;
+- `timestamp`, `position`, `avg_cost`, `realized_pnl`, `unrealized_pnl`;
+- `live_orders`;
+- optional `response` and `execution` that triggered the update.
+
+The topic is a broadcast. Every strategy receives every update and must discard
+those whose `strategy_id` is not its own. See
+[ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md).
 
 ## Provenance and ordering
 

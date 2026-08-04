@@ -47,11 +47,15 @@ class RunRecorder:
 
 
 def run_recording_component(bus: ComponentMessageBus, start_event: Event,
-                            shutdown_event: Event, output_dir: Path | str,) -> None:
+                            shutdown_event: Event, output_dir: Path | str,
+                            ready_event: Event | None = None) -> None:
     configure_logging()
     recorder = RunRecorder(bus)
 
     csv_sink = CsvSink(output_dir)
     recorder.add_sink(SinkType.CSV, csv_sink)
+
+    if ready_event is not None:
+        ready_event.set()
 
     recorder.run(start_event, shutdown_event)
