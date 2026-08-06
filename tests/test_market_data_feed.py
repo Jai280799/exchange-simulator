@@ -196,3 +196,38 @@ def test_component_runner_waits_for_start_and_runs_feed(tmp_path):
     assert count == 2
     assert start_event.wait_calls == [None]
     assert shutdown_event.wait_calls == []
+
+
+def test_pause_holds_the_feed_between_rows(tmp_path) -> None:
+    """Pausing must stop the feed publishing without ending the session."""
+    import threading
+    import time
+
+    path = tmp_path / "md.csv.gz"
+    _write_csv(str(path), [_row(f"09000{i:04d}", str(i)) for i in range(1, 9)])
+
+    bus = RecordingBus()
+    pause, shutdown = threading.Event(), threading.Event()
+    feed = HistoricalMarketDataFeed(
+        bus=bus, data_path=str(path), instrument_id="2603", replay_interval_seconds=0.0,
+    )
+    feed.PAUSE_POLL_SECONDS = 0.01
+
+    pause.set()
+    worker = threading.Thread(
+        target=feed.run, kwargs={"shutdown_event": shutdown, "pause_event": pause})
+    worker.start()
+    try:
+        time.sleep(0.25)
+        held = len(bus.published)
+        # The first row publishes before a pause can apply; nothing after it should.
+        assert held <= 2, f"feed kept publishing while paused: {held}"
+
+        pause.clear()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert len(bus.published) > held
+    finally:
+        shutdown.set()
+        pause.clear()
+        worker.join(timeout=5)

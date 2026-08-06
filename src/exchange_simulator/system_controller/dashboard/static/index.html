@@ -121,6 +121,7 @@
   <label class="chk" title="Passive orders queue behind displayed volume and fill only after historical prints consume the volume ahead of them.">
     <input id="queueTurnover" type="checkbox" checked>queue turnover</label>
   <button id="start">Start</button>
+  <button id="pause" class="ghost">Pause</button>
   <button id="stop" class="ghost">Stop</button>
 </header>
 
@@ -301,6 +302,11 @@ $("start").onclick = async () => {
 };
 
 $("stop").onclick = () => fetch("/api/session/stop", {method: "POST"});
+
+$("pause").onclick = () => fetch(
+  latest && latest.paused ? "/api/session/resume" : "/api/session/pause",
+  {method: "POST"},
+);
 
 function chart(canvas, seriesList, xLabels) {
   const surface = prepare(canvas);
@@ -551,9 +557,13 @@ function renderTape(trades) {
 function render(payload) {
   latest = payload;
   const telemetry = payload.telemetry;
-  $("state").textContent = payload.state;
   $("state").className = "pill " + payload.state;
-  $("start").disabled = ["STARTING", "READY", "RUNNING", "DRAINING"].includes(payload.state);
+  const live = ["STARTING", "READY", "RUNNING", "DRAINING"].includes(payload.state);
+  $("start").disabled = live;
+  $("pause").disabled = !live;
+  $("pause").textContent = payload.paused ? "Resume" : "Pause";
+  // Paused is not a session state, so say so next to the state pill instead.
+  $("state").textContent = payload.paused ? payload.state + " · PAUSED" : payload.state;
   $("clock").textContent = telemetry?.simulation_time ? "sim " + telemetry.simulation_time : "—";
   if (!telemetry) return;
 

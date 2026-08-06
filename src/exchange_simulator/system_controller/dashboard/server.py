@@ -136,6 +136,16 @@ def create_app(
         session.stop()
         return {"state": str(session.state)}
 
+    @app.post("/api/session/pause")
+    def pause_session() -> Dict[str, Any]:
+        session.pause()
+        return {"state": str(session.state), "paused": session.paused}
+
+    @app.post("/api/session/resume")
+    def resume_session() -> Dict[str, Any]:
+        session.resume()
+        return {"state": str(session.state), "paused": session.paused}
+
     @app.get("/api/logs")
     def read_logs(limit: int = 200, contains: Optional[str] = None) -> Dict[str, Any]:
         """The tail of the running session's log, for the dashboard's Log tab.
