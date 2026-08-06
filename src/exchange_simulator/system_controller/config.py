@@ -1,3 +1,5 @@
+import csv
+import gzip
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
@@ -100,6 +102,38 @@ def build_market_impact_model(config: SessionConfig) -> MarketImpactModel:
         return NoImpactModel()
 
     return MarketDepthImpactModel(tick_penalty_per_level=config.market_impact_ticks_per_level)
+
+
+def describe_data_files() -> List[Dict[str, Any]]:
+    """Each replayable file with the instrument and first day it contains.
+
+    The dashboard uses this to pre-select the right instrument and a date that
+    actually exists in the chosen file, since the two are not interchangeable:
+    every instrument has its own tick size, and a date outside the file replays
+    nothing. The instrument comes from the ``<id>_md_<from>_<to>`` filename and
+    the date from the first data row, so nothing has to scan a whole file.
+    """
+    described: List[Dict[str, Any]] = []
+    for path in list_data_files():
+        name = Path(path).name
+        described.append({
+            "path": path,
+            "name": name,
+            "instrument_id": name.split("_", 1)[0] or None,
+            "first_date": _first_date(path),
+        })
+    return described
+
+
+def _first_date(path: str) -> str | None:
+    opener = gzip.open if path.endswith(".gz") else open
+    try:
+        with opener(path, "rt", newline="") as handle:
+            for row in csv.DictReader(handle):
+                return row.get("date") or None
+    except (OSError, csv.Error):
+        return None
+    return None
 
 
 def list_data_files() -> List[str]:

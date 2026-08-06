@@ -92,6 +92,8 @@
   <div class="spacer"></div>
   <label class="ctl">data
     <select id="dataFile" title="Historical tick file replayed from var/"></select></label>
+  <label class="ctl">instrument
+    <select id="instrument" title="Each instrument has its own tick and lot size, so this must match the data file."></select></label>
   <label class="ctl">date
     <input id="date" size="9" value="2021-08-02" title="Trading day to replay (YYYY-MM-DD)"></label>
   <label class="ctl">rows/sec
@@ -234,8 +236,22 @@ function signClass(value) {
 
 async function loadOptions() {
   const options = await (await fetch("/api/options")).json();
-  $("dataFile").innerHTML = options.data_files.map((f) => `<option value="${f}">${f.split("/").pop()}</option>`).join("")
+  $("dataFile").innerHTML = options.data_files.map((f) =>
+    `<option value="${f.path}" data-instrument="${f.instrument_id || ""}" data-date="${f.first_date || ""}">${f.name}</option>`).join("")
     || `<option value="">no file in var/</option>`;
+  $("instrument").innerHTML = options.instruments.map((id) => `<option value="${id}">${id}</option>`).join("");
+
+  // A file belongs to one instrument and one date range; picking the file should
+  // pick both, because a mismatch either replays nothing or prices on the wrong
+  // tick size.
+  const syncToFile = () => {
+    const chosen = $("dataFile").selectedOptions[0];
+    if (!chosen) return;
+    if (chosen.dataset.instrument) $("instrument").value = chosen.dataset.instrument;
+    if (chosen.dataset.date) $("date").value = chosen.dataset.date;
+  };
+  $("dataFile").onchange = syncToFile;
+  syncToFile();
   $("strategyPicker").innerHTML = options.default_strategies.map((s) =>
     `<label class="chk"><input type="checkbox" data-id="${s.strategy_id}" data-kind="${s.kind}" ${s.enabled ? "checked" : ""}>${s.strategy_id}</label>`).join("");
 }
@@ -250,6 +266,7 @@ $("start").onclick = async () => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       data_path: $("dataFile").value || null,
+      instrument_id: $("instrument").value,
       date: $("date").value || null,
       replay_interval_seconds: rate > 0 ? 1 / rate : 0,
       market_impact_ticks_per_level: Math.max(0, parseInt($("impactTicks").value, 10) || 0),

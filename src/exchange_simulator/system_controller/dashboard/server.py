@@ -20,7 +20,7 @@ from exchange_simulator.system_controller.config import (
     SessionConfig,
     StrategyConfig,
     default_data_path,
-    list_data_files,
+    describe_data_files,
 )
 from exchange_simulator.system_controller.controller import SessionController
 
@@ -79,7 +79,7 @@ def create_app(
     @app.get("/api/options")
     def options() -> Dict[str, Any]:
         return {
-            "data_files": list_data_files(),
+            "data_files": describe_data_files(),
             "default_data_path": default_data_path(),
             "instruments": sorted(load_instruments()),
             "strategy_kinds": sorted(STRATEGY_REGISTRY),
