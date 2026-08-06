@@ -73,8 +73,10 @@ def create_app(
     app.state.controller = session
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return _INDEX.read_text()
+    def index() -> HTMLResponse:
+        # The page is read from disk on every request, so a browser holding an
+        # older copy is the only way to see stale UI. Refuse to be cached.
+        return HTMLResponse(_INDEX.read_text(), headers={"Cache-Control": "no-store, must-revalidate"})
 
     @app.get("/api/options")
     def options() -> Dict[str, Any]:
