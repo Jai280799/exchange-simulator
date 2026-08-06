@@ -268,3 +268,42 @@ def test_walking_the_book_prices_depth_exactly(book_without_turnover: OrderBook)
     notional = sum(t.price * t.quantity for t in result.trades)
     # Worse than the touch, and exactly the book's depth-weighted average.
     assert notional / filled == Decimal("100.01")
+
+
+def test_responses_are_stamped_on_the_replay_clock() -> None:
+    """A 2021 order must not carry today's wall-clock hour.
+
+    Responses used to be stamped with datetime.now(), which leaked the operator's
+    local time into the ORDERS stream and orders.csv beside simulated timestamps.
+    """
+    from exchange_simulator.matching_engine.matching_engine import MatchingEngine
+    from exchange_simulator.messaging.message_bus import ComponentMessageBus
+    from exchange_simulator.messaging.topics import RequestTopic, ResponseTopic, StateTopic
+    from exchange_simulator.schemas.order import CreateOrderRequest
+
+    class Bus(ComponentMessageBus):
+        def __init__(self) -> None:
+            self.published = []
+
+        def publish(self, topic, message) -> None:
+            self.published.append((topic, message))
+
+        def receive(self, timeout=None):
+            raise NotImplementedError
+
+    bus = Bus()
+    engine = MatchingEngine(NoImpactModel(), bus, {INSTRUMENT_ID: INSTRUMENT})
+    engine._handle_message(StateTopic.MARKET_DATA, build_snapshot(
+        bids=(level("100.00", 500),), asks=(level("100.02", 400),)))
+
+    sent_at = MARKET_DATA_TIMESTAMP + dt.timedelta(milliseconds=5)
+    engine._handle_message(RequestTopic.CREATE_ORDER, CreateOrderRequest(
+        order_id="order-1", strategy_id=STRATEGY_ID, instrument_id=INSTRUMENT_ID,
+        side=Side.BUY, order_type=OrderType.LIMIT, quantity=100,
+        price=Decimal("99.00"), timestamp=sent_at))
+
+    responses = [m for t, m in bus.published if t is ResponseTopic.CREATE_ORDER]
+    assert len(responses) == 1
+    # The request is the latest event on the replay clock, so it stamps itself.
+    assert responses[0].timestamp == sent_at
+    assert responses[0].timestamp.year == MARKET_DATA_TIMESTAMP.year
