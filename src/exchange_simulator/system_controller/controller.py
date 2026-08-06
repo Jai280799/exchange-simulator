@@ -31,7 +31,7 @@ from exchange_simulator.strategies.runner import component_name as strategy_comp
 from exchange_simulator.strategies.runner import run_strategy_component
 from exchange_simulator.system_controller import Component, SessionState
 from exchange_simulator.system_controller.component_specs import build_all_component_specs
-from exchange_simulator.system_controller.config import SessionConfig
+from exchange_simulator.system_controller.config import SessionConfig, build_market_impact_model
 from exchange_simulator.system_controller.dashboard.telemetry import TelemetryHub
 from exchange_simulator.trading_platform.platform import run_trading_platform_component
 
@@ -216,8 +216,9 @@ class SessionController:
                     topology.create_component_bus(Component.MATCHING_ENGINE),
                     self._start_event,
                     self._shutdown_event,
-                    None,
+                    build_market_impact_model(config),
                     self._ready_event(Component.MATCHING_ENGINE),
+                    config.queue_turnover,
                 ),
             ),
             Component.TRADING_PLATFORM: mp.Process(

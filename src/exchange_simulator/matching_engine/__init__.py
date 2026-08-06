@@ -18,6 +18,9 @@ class BookOrder:
     remaining_quantity: int
     price: Final[Decimal | None]
     creation_request_timestamp: dt.datetime
+    # Displayed external volume resting ahead of this order at its price. Always
+    # zero unless queue turnover is enabled.
+    queue_ahead: int = 0
 
 
 @dataclass(slots=True)

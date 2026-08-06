@@ -14,7 +14,7 @@ from exchange_simulator.messaging.topics import RequestTopic, StateTopic, Topic,
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType
 from exchange_simulator.schemas.executions import ExecutionReport, Trade
 from exchange_simulator.schemas.instrument import Instrument
-from exchange_simulator.schemas.market_data import MarketDataSnapshot
+from exchange_simulator.schemas.market_data import MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.schemas.order import CreateOrderRequest, CancelOrderRequest, OrderResponse
 from exchange_simulator.logging_config import configure_logging
 
@@ -24,8 +24,10 @@ _logger = logging.getLogger(__name__)
 class MatchingEngine:
 
     def __init__(self, market_impact_model: MarketImpactModel, bus: ComponentMessageBus,
-                 instruments: Optional[Dict[str, Instrument]] = None):
+                 instruments: Optional[Dict[str, Instrument]] = None,
+                 queue_turnover: bool = False):
         self._market_impact_model: MarketImpactModel = market_impact_model
+        self._queue_turnover: bool = queue_turnover
         self._bus: ComponentMessageBus = bus
         self._order_book_cache: Dict[str, OrderBook] = {}
         self._live_order_cache: Dict[str, BookOrder] = {}
@@ -54,6 +56,8 @@ class MatchingEngine:
                     self._process_cancel_order_request(message)
                 case StateTopic.MARKET_DATA:
                     self._process_market_data_snapshot(message)
+                case StateTopic.MARKET_TRADES:
+                    self._process_market_trade_print(message)
                 case _:
                     raise ValueError(f"Received message on unexpected topic: {topic}. Please contact developer.")
         except Exception:
@@ -151,13 +155,26 @@ class MatchingEngine:
         self._process_removed_order_ids(order_book_result)
         self._publish_order_book_result(order_book_result)
 
+    def _process_market_trade_print(self, market_trade_print: MarketTradePrint) -> None:
+        """Historical prints advance the external queue ahead of our orders."""
+        if not self._queue_turnover:
+            return
+
+        _logger.debug("Received market trade print: %s", market_trade_print)
+        order_book_result = self._get_or_create_order_book(
+            market_trade_print.instrument_id
+        ).on_market_trade_print(market_trade_print)
+
+        self._process_removed_order_ids(order_book_result)
+        self._publish_order_book_result(order_book_result)
+
     def _get_or_create_order_book(self, instrument_id: str) -> OrderBook:
         instrument = self._instruments.get(instrument_id)
         if instrument is None:
             raise ValueError(f"Instrument with ID {instrument_id} does not exist.")
 
         if instrument_id not in self._order_book_cache:
-            self._order_book_cache[instrument_id] = OrderBook(instrument, self._market_impact_model)
+            self._order_book_cache[instrument_id] = OrderBook(instrument, self._market_impact_model, self._queue_turnover)
 
         return self._order_book_cache[instrument_id]
 
@@ -182,11 +199,11 @@ class MatchingEngine:
         self._bus.publish(StateTopic.EXECUTION_REPORT, execution_report)
 
 
-def run_matching_engine_component(bus: ComponentMessageBus, start_event: Event, shutdown_event: Event, market_impact_model: Optional[MarketImpactModel] = None, ready_event: Optional[Event] = None) -> None:
+def run_matching_engine_component(bus: ComponentMessageBus, start_event: Event, shutdown_event: Event, market_impact_model: Optional[MarketImpactModel] = None, ready_event: Optional[Event] = None, queue_turnover: bool = False) -> None:
     configure_logging()
     if market_impact_model is None:
         market_impact_model = NoImpactModel()
-    engine = MatchingEngine(market_impact_model, bus)
+    engine = MatchingEngine(market_impact_model, bus, queue_turnover=queue_turnover)
     if ready_event is not None:
         ready_event.set()
     engine.run(start_event, shutdown_event)

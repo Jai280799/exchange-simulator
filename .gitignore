@@ -17,3 +17,5 @@ runs/
 MEMORY.md
 MEMORY_ARCHIVE.md
 PREFERENCE.md
+var/
+runs/
