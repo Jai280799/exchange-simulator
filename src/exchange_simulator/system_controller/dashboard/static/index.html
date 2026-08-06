@@ -97,6 +97,11 @@
   <label class="ctl">rows/sec
     <input id="rate" size="5" value="500"
            title="Replay speed in source rows per second. 0 means as fast as the bus allows (~1200/s)."></label>
+  <label class="ctl">impact ticks/level
+    <input id="impactTicks" size="3" value="0"
+           title="Extra slippage per depth level, in ticks. 0 prices depth by walking the book alone, which is already exact; raise it to charge for liquidity beyond the five visible levels."></label>
+  <label class="chk" title="Passive orders queue behind displayed volume and fill only after historical prints consume the volume ahead of them.">
+    <input id="queueTurnover" type="checkbox" checked>queue turnover</label>
   <button id="start">Start</button>
   <button id="stop" class="ghost">Stop</button>
 </header>
@@ -104,6 +109,7 @@
 <nav>
   <button data-tab="live" class="active">Live</button>
   <button data-tab="session">Session</button>
+  <button data-tab="logs">Log</button>
 </nav>
 
 <main>
@@ -184,6 +190,20 @@
       <pre id="runInfo">No session yet.</pre>
     </div>
   </section>
+
+  <section id="logs" class="tab">
+    <div class="panel">
+      <h2>Component log</h2>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+        <label class="ctl">filter
+          <input id="logFilter" size="26" placeholder="e.g. Queue turnover"
+                 title="Only show lines containing this text (case-insensitive)"></label>
+        <label class="chk"><input id="logFollow" type="checkbox" checked>follow</label>
+        <span id="logPath" style="color:var(--muted);font-size:11px"></span>
+      </div>
+      <div class="scroll" id="logScroll" style="max-height:70vh"><pre id="logView">No session yet.</pre></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -198,6 +218,7 @@ document.querySelectorAll("nav button").forEach((button) => {
     button.classList.add("active");
     $(button.dataset.tab).classList.add("active");
     if (latest) render(latest);
+    if (button.dataset.tab === "logs") refreshLogs();
   };
 });
 
@@ -231,6 +252,8 @@ $("start").onclick = async () => {
       data_path: $("dataFile").value || null,
       date: $("date").value || null,
       replay_interval_seconds: rate > 0 ? 1 / rate : 0,
+      market_impact_ticks_per_level: Math.max(0, parseInt($("impactTicks").value, 10) || 0),
+      queue_turnover: $("queueTurnover").checked,
       strategies,
     }),
   });
@@ -404,6 +427,29 @@ function render(payload) {
       (payload.config ? JSON.stringify(payload.config, null, 2) : "");
   }
 }
+
+async function refreshLogs() {
+  if (!$("logs").classList.contains("active")) return;
+
+  const filter = $("logFilter").value.trim();
+  const query = filter ? `?limit=400&contains=${encodeURIComponent(filter)}` : "?limit=400";
+  try {
+    const payload = await (await fetch(`/api/logs${query}`)).json();
+    $("logPath").textContent = payload.path || "no run yet";
+    $("logView").textContent = payload.lines.length
+      ? payload.lines.join("\n")
+      : (filter ? `No lines matching ${filter}` : "Log is empty so far.");
+    if ($("logFollow").checked) {
+      const scroller = $("logScroll");
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  } catch (error) {
+    $("logView").textContent = `Could not read the log: ${error}`;
+  }
+}
+
+setInterval(refreshLogs, 1000);
+$("logFilter").oninput = refreshLogs;
 
 function connect() {
   const source = new EventSource("/api/stream");

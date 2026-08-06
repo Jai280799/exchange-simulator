@@ -1,6 +1,7 @@
 """FastAPI control plane and live dashboard for a demo session."""
 
 import asyncio
+import os
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -26,6 +27,9 @@ from exchange_simulator.system_controller.controller import SessionController
 _logger = logging.getLogger(__name__)
 
 _INDEX = Path(__file__).parent / "static" / "index.html"
+LOG_FILE_NAME = "system.log"
+LOG_TAIL_BYTES = 256 * 1024
+
 STREAM_INTERVAL_SECONDS = 1.0
 
 
@@ -40,6 +44,10 @@ class StartRequest(BaseModel):
     instrument_id: str = "2603"
     date: Optional[str] = "2021-08-02"
     replay_interval_seconds: float = 0.002
+    # Left unset these follow the SessionConfig defaults rather than shadowing
+    # them, so the realism extensions are not silently switched off by the UI.
+    market_impact_ticks_per_level: Optional[int] = None
+    queue_turnover: Optional[bool] = None
     strategies: Optional[List[StrategyRequest]] = None
 
 
@@ -97,12 +105,19 @@ def create_app(
             else DEFAULT_STRATEGIES
         )
 
+        realism: Dict[str, Any] = {}
+        if request.market_impact_ticks_per_level is not None:
+            realism["market_impact_ticks_per_level"] = request.market_impact_ticks_per_level
+        if request.queue_turnover is not None:
+            realism["queue_turnover"] = request.queue_turnover
+
         config = SessionConfig(
             data_path=data_path,
             instrument_id=request.instrument_id,
             date=request.date or None,
             replay_interval_seconds=request.replay_interval_seconds,
             strategies=strategies,
+            **realism,
         )
 
         try:
@@ -118,6 +133,37 @@ def create_app(
     def stop_session() -> Dict[str, Any]:
         session.stop()
         return {"state": str(session.state)}
+
+    @app.get("/api/logs")
+    def read_logs(limit: int = 200, contains: Optional[str] = None) -> Dict[str, Any]:
+        """The tail of the running session's log, for the dashboard's Log tab.
+
+        Reads only the last slice of the file so a full trading day stays cheap
+        to poll, and drops the first line of that slice because it is usually cut
+        mid-message.
+        """
+        output_dir = session.snapshot().get("output_dir")
+        if not output_dir:
+            return {"path": None, "lines": []}
+
+        path = Path(output_dir) / LOG_FILE_NAME
+        if not path.exists():
+            return {"path": str(path), "lines": []}
+
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - LOG_TAIL_BYTES))
+            block = handle.read().decode("utf-8", errors="replace")
+
+        lines = block.splitlines()
+        if size > LOG_TAIL_BYTES and lines:
+            lines = lines[1:]
+        if contains:
+            needle = contains.lower()
+            lines = [line for line in lines if needle in line.lower()]
+
+        return {"path": str(path), "lines": lines[-max(1, min(limit, 2000)):]}
 
     @app.get("/api/stream")
     async def stream() -> StreamingResponse:
