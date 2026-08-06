@@ -303,14 +303,9 @@ $("start").onclick = async () => {
 $("stop").onclick = () => fetch("/api/session/stop", {method: "POST"});
 
 function chart(canvas, seriesList, xLabels) {
-  const ratio = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth, height = canvas.height;
-  if (!width) return;
-  canvas.width = width * ratio; canvas.style.height = height + "px";
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-  ctx.setLineDash([]);
+  const surface = prepare(canvas);
+  if (!surface) return;
+  const {ctx, width, height} = surface;
 
   const values = seriesList.flatMap((s) => s.points).filter((v) => v !== null && v !== undefined);
   if (values.length < 2) {
@@ -390,8 +385,8 @@ function sizeCharts() {
   // cut off on a small window or wastes space on a large one.
   const pane = Math.round(clamp(window.innerHeight - 200, 300, 620));
   document.querySelector(".live").style.setProperty("--pane", pane + "px");
-  $("priceChart").height = pane - 36;                       // panel padding and title
-  $("pnlChart").height = Math.round(clamp(window.innerHeight * 0.22, 130, 220));
+  $("priceChart").dataset.height = pane - 36;               // panel padding and title
+  $("pnlChart").dataset.height = Math.round(clamp(window.innerHeight * 0.22, 130, 220));
   // A clipped panel reads as broken, so on a short window the tape steps aside
   // and the ladder keeps its full depth.
   const roomForTape = pane >= 430;
@@ -423,14 +418,29 @@ function toCandles(series) {
   return candles;
 }
 
-function drawCandles(canvas, candles, lastPrice) {
+function prepare(canvas) {
+  // The bitmap is scaled on both axes: scaling only the width while the drawing
+  // transform scales both clips everything below height / devicePixelRatio.
   const ratio = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth, height = canvas.height;
-  if (!width) return;
-  canvas.width = width * ratio; canvas.style.height = height + "px";
+  const width = canvas.clientWidth;
+  const height = Math.round(parseFloat(canvas.dataset.height) || 300);
+  if (!width) return null;
+
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  canvas.style.height = height + "px";
+
   const ctx = canvas.getContext("2d");
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
+  ctx.setLineDash([]);
+  return {ctx, width, height};
+}
+
+function drawCandles(canvas, candles, lastPrice) {
+  const surface = prepare(canvas);
+  if (!surface) return;
+  const {ctx, width, height} = surface;
 
   if (candles.length < 2) {
     ctx.fillStyle = "#8c98a8"; ctx.font = "12px monospace";
