@@ -46,8 +46,8 @@
   /* Fixed top row so the chart and the ladder are one pane, as on a venue UI;
      everything analytical sits underneath it. */
   .live { display: grid; gap: 10px;
-          grid-template-columns: minmax(0, 1fr) 300px;
-          grid-template-rows: 566px auto auto auto;
+          grid-template-columns: minmax(0, 1fr) minmax(230px, 290px);
+          grid-template-rows: var(--pane, 560px) auto auto auto;
           grid-template-areas: "price book" "strats strats" "pnl pnl" "blotters blotters"; }
   .a-price { grid-area: price; min-height: 0; }
   .a-book { grid-area: book; display: grid; gap: 10px; min-height: 0;
@@ -55,7 +55,7 @@
   .a-pnl { grid-area: pnl; } .a-strats { grid-area: strats; }
   .a-blotters { grid-area: blotters; display: grid; gap: 10px;
                 grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  @media (max-width: 1100px) {
+  @media (max-width: 820px) {
     .live { grid-template-columns: 1fr; grid-template-rows: none;
             grid-template-areas: "price" "book" "strats" "pnl" "blotters"; }
     .a-blotters { grid-template-columns: 1fr; }
@@ -138,7 +138,7 @@
           <h2 style="margin:0">Price</h2>
           <span id="candleInfo" style="color:var(--muted);font-size:11px"></span>
         </div>
-        <canvas id="priceChart" height="524"></canvas>
+        <canvas id="priceChart"></canvas>
       </div>
 
       <div class="a-book">
@@ -153,7 +153,7 @@
           </div>
           <table class="ladder"><tbody id="bidRows"></tbody></table>
         </div>
-        <div class="panel" style="display:flex;flex-direction:column;min-height:0">
+        <div class="panel" id="tapePanel" style="display:flex;flex-direction:column;min-height:0">
           <h2>Trades</h2>
           <div style="flex:1;min-height:0;overflow-y:auto">
             <table class="tape"><thead><tr>
@@ -165,7 +165,7 @@
 
       <div class="panel a-pnl">
         <h2>Total PnL by strategy</h2>
-        <canvas id="pnlChart" height="180"></canvas>
+        <canvas id="pnlChart"></canvas>
         <div class="legend" id="pnlLegend"></div>
       </div>
 
@@ -383,6 +383,22 @@ function chart(canvas, seriesList, xLabels) {
 
 const CANDLE_TARGET = 80;   // candles across the panel, exchange-like density
 
+function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
+
+function sizeCharts() {
+  // The trading pane should fit the window: a fixed pixel height is either
+  // cut off on a small window or wastes space on a large one.
+  const pane = Math.round(clamp(window.innerHeight - 200, 300, 620));
+  document.querySelector(".live").style.setProperty("--pane", pane + "px");
+  $("priceChart").height = pane - 36;                       // panel padding and title
+  $("pnlChart").height = Math.round(clamp(window.innerHeight * 0.22, 130, 220));
+  // A clipped panel reads as broken, so on a short window the tape steps aside
+  // and the ladder keeps its full depth.
+  const roomForTape = pane >= 430;
+  $("tapePanel").style.display = roomForTape ? "flex" : "none";
+  document.querySelector(".a-book").style.gridTemplateRows = roomForTape ? "auto minmax(0, 1fr)" : "auto";
+}
+
 function toCandles(series) {
   // The feed gives one point per snapshot; bucket them into OHLC so the panel
   // reads like a chart instead of a fuzzy band of three overlapping lines.
@@ -542,6 +558,7 @@ function render(payload) {
   const strategies = telemetry.strategies || [];
 
   if ($("live").classList.contains("active")) {
+    sizeCharts();
     const candles = toCandles(series);
     drawCandles($("priceChart"), candles, telemetry.last_trade_price ?? telemetry.last_mid);
     $("candleInfo").textContent = candles.length
@@ -620,6 +637,12 @@ function connect() {
   source.onmessage = (event) => render(JSON.parse(event.data));
   source.onerror = () => { source.close(); setTimeout(connect, 2000); };
 }
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (latest) render(latest); }, 120);
+});
 
 loadOptions().then(connect);
 </script>
