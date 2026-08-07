@@ -46,6 +46,9 @@ def component_spec() -> ComponentSpec:
 
 
 class HistoricalMarketDataFeed:
+
+    PAUSE_POLL_SECONDS = 0.1
+
     def __init__(
         self,
         bus: ComponentMessageBus,
@@ -63,12 +66,18 @@ class HistoricalMarketDataFeed:
         self._date = date
         self._replay_interval_seconds = replay_interval_seconds
 
-    def run(self, shutdown_event: Optional[EventLike] = None) -> int:
+    def run(self, shutdown_event: Optional[EventLike] = None,
+            pause_event: Optional[EventLike] = None) -> int:
         """Replay source rows until end-of-file or a shutdown request.
 
         A fixed interval is applied between source rows, not between messages.
         This keeps a snapshot and the optional trade print derived from that row
         adjacent on the bus. Source timestamps are preserved in both payloads.
+
+        While ``pause_event`` is set the feed holds between rows, so the rest of
+        the system simply stops receiving market data and keeps its state. A row
+        is never split by a pause: the snapshot and its trade print stay
+        adjacent.
         """
         _logger.info(
             "Starting historical market-data feed for %s (%s) from %s at %.3f seconds per row",
@@ -92,6 +101,10 @@ class HistoricalMarketDataFeed:
                     stopped = True
                     break
 
+                if self._hold_while_paused(shutdown_event, pause_event):
+                    stopped = True
+                    break
+
                 self._bus.publish(StateTopic.MARKET_DATA, message)
             else:
                 self._bus.publish(StateTopic.MARKET_TRADES, message)
@@ -104,6 +117,24 @@ class HistoricalMarketDataFeed:
             published,
         )
         return published
+
+    def _hold_while_paused(
+        self,
+        shutdown_event: Optional[EventLike],
+        pause_event: Optional[EventLike],
+    ) -> bool:
+        """Block between rows while paused; True if shutdown arrived instead."""
+        if pause_event is None:
+            return False
+
+        while pause_event.is_set():
+            if shutdown_event is None:
+                time.sleep(self.PAUSE_POLL_SECONDS)
+                continue
+            if shutdown_event.wait(self.PAUSE_POLL_SECONDS):
+                return True
+
+        return False
 
     def _wait_for_next_row(
         self,
@@ -126,6 +157,7 @@ def run_historical_market_data_feed_component(
     date: Optional[str] = None,
     replay_interval_seconds: float = 0.0,
     ready_event: Optional[EventLike] = None,
+    pause_event: Optional[EventLike] = None,
 ) -> int:
     """Run the feed behind the same lifecycle events as other components."""
     configure_logging()
@@ -142,4 +174,4 @@ def run_historical_market_data_feed_component(
 
     _logger.info("Historical market-data feed component is waiting to start")
     start_event.wait()
-    return feed.run(shutdown_event=shutdown_event)
+    return feed.run(shutdown_event=shutdown_event, pause_event=pause_event)

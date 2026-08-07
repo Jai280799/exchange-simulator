@@ -199,3 +199,15 @@ def test_auth_is_disabled_when_no_password_is_configured() -> None:
     app = create_app(auth_dependency=build_auth_dependency(username="demo", password=None))
     with TestClient(app) as client:
         assert client.get("/api/session").status_code == 200
+
+
+def test_options_describe_each_data_file_for_the_picker() -> None:
+    """The picker needs the instrument and a date the file actually contains."""
+    with TestClient(create_app()) as client:
+        options = client.get("/api/options").json()
+
+        for described in options["data_files"]:
+            assert described["path"].endswith((".csv", ".csv.gz"))
+            assert described["name"]
+            # Files follow <instrument>_md_<from>_<to>, so the id is derivable.
+            assert described["instrument_id"] == described["name"].split("_", 1)[0]

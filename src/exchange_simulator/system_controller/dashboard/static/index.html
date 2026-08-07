@@ -43,18 +43,34 @@
   .panel h2 { font-size: 10px; text-transform: uppercase; letter-spacing: .11em;
               color: var(--muted); margin: 0 0 6px; font-weight: 600; }
 
+  /* Fixed top row so the chart and the ladder are one pane, as on a venue UI;
+     everything analytical sits underneath it. */
   .live { display: grid; gap: 10px;
-          grid-template-columns: minmax(0, 2.3fr) minmax(230px, .7fr);
-          grid-template-areas: "price book" "pnl book" "strats strats" "blotters blotters"; }
-  .a-price { grid-area: price; } .a-book { grid-area: book; }
+          grid-template-columns: minmax(0, 1fr) minmax(230px, 290px);
+          grid-template-rows: var(--pane, 560px) auto auto auto;
+          grid-template-areas: "price book" "strats strats" "pnl pnl" "blotters blotters"; }
+  .a-price { grid-area: price; min-height: 0; }
+  .a-book { grid-area: book; display: grid; gap: 10px; min-height: 0;
+            grid-template-rows: auto minmax(0, 1fr); }
   .a-pnl { grid-area: pnl; } .a-strats { grid-area: strats; }
   .a-blotters { grid-area: blotters; display: grid; gap: 10px;
-                grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  @media (max-width: 1000px) {
-    .live { grid-template-columns: 1fr;
-            grid-template-areas: "price" "book" "pnl" "strats" "blotters"; }
+                grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 820px) {
+    .live { grid-template-columns: 1fr; grid-template-rows: none;
+            grid-template-areas: "price" "book" "strats" "pnl" "blotters"; }
     .a-blotters { grid-template-columns: 1fr; }
   }
+
+  /* Exchange-style ladder: depth grows from the right, price sits on the left. */
+  .ladder { font-size: 12px; }
+  .ladder td { border: 0; padding: 1.5px 8px; position: relative; }
+  .bar { position: absolute; inset: 0 0 0 auto; opacity: .18; }
+  .last { display: flex; align-items: baseline; gap: 8px; padding: 7px 8px;
+          border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 3px 0; }
+  .last b { font-size: 19px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .last span { color: var(--muted); font-size: 11px; }
+  .tape td { padding: 1.5px 8px; border: 0; }
+  .tape tbody tr:nth-child(even) { background: rgba(255,255,255,.015); }
   .g-half { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   @media (max-width: 900px) { .g-half { grid-template-columns: 1fr; } }
 
@@ -92,45 +108,65 @@
   <div class="spacer"></div>
   <label class="ctl">data
     <select id="dataFile" title="Historical tick file replayed from var/"></select></label>
+  <label class="ctl">instrument
+    <select id="instrument" title="Each instrument has its own tick and lot size, so this must match the data file."></select></label>
   <label class="ctl">date
     <input id="date" size="9" value="2021-08-02" title="Trading day to replay (YYYY-MM-DD)"></label>
   <label class="ctl">rows/sec
     <input id="rate" size="5" value="500"
            title="Replay speed in source rows per second. 0 means as fast as the bus allows (~1200/s)."></label>
+  <label class="ctl">impact ticks/level
+    <input id="impactTicks" size="3" value="0"
+           title="Extra slippage per depth level, in ticks. 0 prices depth by walking the book alone, which is already exact; raise it to charge for liquidity beyond the five visible levels."></label>
+  <label class="chk" title="Passive orders queue behind displayed volume and fill only after historical prints consume the volume ahead of them.">
+    <input id="queueTurnover" type="checkbox" checked>queue turnover</label>
   <button id="start">Start</button>
+  <button id="pause" class="ghost">Pause</button>
   <button id="stop" class="ghost">Stop</button>
 </header>
 
 <nav>
   <button data-tab="live" class="active">Live</button>
   <button data-tab="session">Session</button>
+  <button data-tab="logs">Log</button>
 </nav>
 
 <main>
   <section id="live" class="tab active">
     <div class="live">
       <div class="panel a-price">
-        <h2>Price</h2>
-        <canvas id="priceChart" height="230"></canvas>
-        <div class="legend">
-          <span><i style="background:#2fbf71"></i>best bid</span>
-          <span><i style="background:#ff5c5c"></i>best ask</span>
-          <span><i style="background:#4da3ff"></i>mid</span>
-          <span><i style="background:#ffc857;border-radius:50%"></i>trades</span>
+        <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:2px">
+          <h2 style="margin:0">Price</h2>
+          <span id="candleInfo" style="color:var(--muted);font-size:11px"></span>
         </div>
+        <canvas id="priceChart"></canvas>
       </div>
 
-      <div class="panel a-book">
-        <h2>Order book · cumulative</h2>
-        <table class="ladder">
-          <thead><tr><th>price</th><th class="num">qty</th><th class="num">cum</th></tr></thead>
-          <tbody id="ladder"></tbody>
-        </table>
+      <div class="a-book">
+        <div class="panel">
+          <h2>Order book</h2>
+          <table class="ladder"><thead><tr>
+            <th>price</th><th class="num">size</th><th class="num">sum</th>
+          </tr></thead><tbody id="askRows"></tbody></table>
+          <div class="last">
+            <b id="lastPrice">—</b>
+            <span id="spreadInfo"></span>
+          </div>
+          <table class="ladder"><tbody id="bidRows"></tbody></table>
+        </div>
+        <div class="panel" id="tapePanel" style="display:flex;flex-direction:column;min-height:0">
+          <h2>Trades</h2>
+          <div style="flex:1;min-height:0;overflow-y:auto">
+            <table class="tape"><thead><tr>
+              <th>time</th><th class="num">price</th><th class="num">qty</th>
+            </tr></thead><tbody id="tape"></tbody></table>
+          </div>
+        </div>
       </div>
 
       <div class="panel a-pnl">
         <h2>Total PnL by strategy</h2>
-        <canvas id="pnlChart" height="180"></canvas>
+        <canvas id="pnlChart"></canvas>
         <div class="legend" id="pnlLegend"></div>
       </div>
 
@@ -147,10 +183,6 @@
       </div>
 
       <div class="a-blotters">
-        <div class="panel">
-          <h2>Simulated trades</h2>
-          <div class="scroll"><table><thead><tr><th>time</th><th>side</th><th class="num">price</th><th class="num">qty</th></tr></thead><tbody id="trades"></tbody></table></div>
-        </div>
         <div class="panel">
           <h2>Executions</h2>
           <div class="scroll"><table><thead><tr><th>time</th><th>order</th><th>side</th><th class="num">price</th><th class="num">qty</th></tr></thead><tbody id="execs"></tbody></table></div>
@@ -184,6 +216,20 @@
       <pre id="runInfo">No session yet.</pre>
     </div>
   </section>
+
+  <section id="logs" class="tab">
+    <div class="panel">
+      <h2>Component log</h2>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+        <label class="ctl">filter
+          <input id="logFilter" size="26" placeholder="e.g. Queue turnover"
+                 title="Only show lines containing this text (case-insensitive)"></label>
+        <label class="chk"><input id="logFollow" type="checkbox" checked>follow</label>
+        <span id="logPath" style="color:var(--muted);font-size:11px"></span>
+      </div>
+      <div class="scroll" id="logScroll" style="max-height:70vh"><pre id="logView">No session yet.</pre></div>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -198,6 +244,7 @@ document.querySelectorAll("nav button").forEach((button) => {
     button.classList.add("active");
     $(button.dataset.tab).classList.add("active");
     if (latest) render(latest);
+    if (button.dataset.tab === "logs") refreshLogs();
   };
 });
 
@@ -213,8 +260,22 @@ function signClass(value) {
 
 async function loadOptions() {
   const options = await (await fetch("/api/options")).json();
-  $("dataFile").innerHTML = options.data_files.map((f) => `<option value="${f}">${f.split("/").pop()}</option>`).join("")
+  $("dataFile").innerHTML = options.data_files.map((f) =>
+    `<option value="${f.path}" data-instrument="${f.instrument_id || ""}" data-date="${f.first_date || ""}">${f.name}</option>`).join("")
     || `<option value="">no file in var/</option>`;
+  $("instrument").innerHTML = options.instruments.map((id) => `<option value="${id}">${id}</option>`).join("");
+
+  // A file belongs to one instrument and one date range; picking the file should
+  // pick both, because a mismatch either replays nothing or prices on the wrong
+  // tick size.
+  const syncToFile = () => {
+    const chosen = $("dataFile").selectedOptions[0];
+    if (!chosen) return;
+    if (chosen.dataset.instrument) $("instrument").value = chosen.dataset.instrument;
+    if (chosen.dataset.date) $("date").value = chosen.dataset.date;
+  };
+  $("dataFile").onchange = syncToFile;
+  syncToFile();
   $("strategyPicker").innerHTML = options.default_strategies.map((s) =>
     `<label class="chk"><input type="checkbox" data-id="${s.strategy_id}" data-kind="${s.kind}" ${s.enabled ? "checked" : ""}>${s.strategy_id}</label>`).join("");
 }
@@ -229,8 +290,11 @@ $("start").onclick = async () => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       data_path: $("dataFile").value || null,
+      instrument_id: $("instrument").value,
       date: $("date").value || null,
       replay_interval_seconds: rate > 0 ? 1 / rate : 0,
+      market_impact_ticks_per_level: Math.max(0, parseInt($("impactTicks").value, 10) || 0),
+      queue_turnover: $("queueTurnover").checked,
       strategies,
     }),
   });
@@ -239,15 +303,15 @@ $("start").onclick = async () => {
 
 $("stop").onclick = () => fetch("/api/session/stop", {method: "POST"});
 
+$("pause").onclick = () => fetch(
+  latest && latest.paused ? "/api/session/resume" : "/api/session/pause",
+  {method: "POST"},
+);
+
 function chart(canvas, seriesList, xLabels) {
-  const ratio = window.devicePixelRatio || 1;
-  const width = canvas.clientWidth, height = canvas.height;
-  if (!width) return;
-  canvas.width = width * ratio; canvas.style.height = height + "px";
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-  ctx.setLineDash([]);
+  const surface = prepare(canvas);
+  if (!surface) return;
+  const {ctx, width, height} = surface;
 
   const values = seriesList.flatMap((s) => s.points).filter((v) => v !== null && v !== undefined);
   if (values.length < 2) {
@@ -318,27 +382,188 @@ function chart(canvas, seriesList, xLabels) {
   });
 }
 
-function renderLadder(book, mid) {
-  // Asks render outermost-first so depth grows away from the touch on both sides.
-  const asks = (book.asks || []).slice().reverse(), bids = book.bids || [];
+const CANDLE_TARGET = 80;   // candles across the panel, exchange-like density
+
+function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
+
+function sizeCharts() {
+  // The trading pane should fit the window: a fixed pixel height is either
+  // cut off on a small window or wastes space on a large one.
+  const pane = Math.round(clamp(window.innerHeight - 200, 300, 620));
+  document.querySelector(".live").style.setProperty("--pane", pane + "px");
+  $("priceChart").dataset.height = pane - 36;               // panel padding and title
+  $("pnlChart").dataset.height = Math.round(clamp(window.innerHeight * 0.22, 130, 220));
+  // A clipped panel reads as broken, so on a short window the tape steps aside
+  // and the ladder keeps its full depth.
+  const roomForTape = pane >= 430;
+  $("tapePanel").style.display = roomForTape ? "flex" : "none";
+  document.querySelector(".a-book").style.gridTemplateRows = roomForTape ? "auto minmax(0, 1fr)" : "auto";
+}
+
+function toCandles(series) {
+  // The feed gives one point per snapshot; bucket them into OHLC so the panel
+  // reads like a chart instead of a fuzzy band of three overlapping lines.
+  const points = series.filter((p) => p.mid !== null && p.mid !== undefined);
+  if (points.length < 2) return [];
+
+  const size = Math.max(1, Math.ceil(points.length / CANDLE_TARGET));
+  const candles = [];
+  for (let start = 0; start < points.length; start += size) {
+    const bucket = points.slice(start, start + size);
+    const mids = bucket.map((p) => p.mid);
+    const trades = bucket.map((p) => p.trade).filter((v) => v !== null && v !== undefined);
+    candles.push({
+      t: bucket[bucket.length - 1].t,
+      open: mids[0],
+      close: mids[mids.length - 1],
+      high: Math.max(...mids, ...trades),
+      low: Math.min(...mids, ...trades),
+      volume: trades.length,
+    });
+  }
+  return candles;
+}
+
+function prepare(canvas) {
+  // The bitmap is scaled on both axes: scaling only the width while the drawing
+  // transform scales both clips everything below height / devicePixelRatio.
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = Math.round(parseFloat(canvas.dataset.height) || 300);
+  if (!width) return null;
+
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  canvas.style.height = height + "px";
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.setLineDash([]);
+  return {ctx, width, height};
+}
+
+function drawCandles(canvas, candles, lastPrice) {
+  const surface = prepare(canvas);
+  if (!surface) return;
+  const {ctx, width, height} = surface;
+
+  if (candles.length < 2) {
+    ctx.fillStyle = "#8c98a8"; ctx.font = "12px monospace";
+    ctx.fillText("waiting for data…", 12, height / 2);
+    return;
+  }
+
+  // Price axis on the right, volume in its own strip below - the usual layout.
+  const left = 6, right = 62, top = 10, bottom = 20, volumeH = Math.round(height * 0.18), gap = 8;
+  const plotW = width - left - right;
+  const priceH = height - top - bottom - volumeH - gap;
+  const highs = candles.map((c) => c.high), lows = candles.map((c) => c.low);
+  let max = Math.max(...highs), min = Math.min(...lows);
+  if (max - min < 1e-9) { max += 1; min -= 1; }
+  const pad = (max - min) * 0.06; max += pad; min -= pad;
+  const peakVolume = Math.max(1, ...candles.map((c) => c.volume));
+
+  const step = plotW / candles.length;
+  const bodyW = Math.max(1.5, Math.min(11, step * 0.62));
+  const x = (i) => left + step * (i + 0.5);
+  const y = (v) => top + priceH - ((v - min) / (max - min)) * priceH;
+  const volumeTop = top + priceH + gap;
+
+  ctx.font = "10px ui-monospace, monospace";
+  for (let i = 0; i <= 4; i++) {
+    const value = min + ((max - min) * i) / 4, py = Math.round(y(value)) + 0.5;
+    ctx.strokeStyle = "#1c222a";
+    ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(left + plotW, py); ctx.stroke();
+    ctx.fillStyle = "#8c98a8";
+    ctx.fillText(fmt(value, max - min > 40 ? 0 : 1), left + plotW + 7, py + 3);
+  }
+
+  const labelEvery = Math.max(1, Math.ceil(candles.length / Math.max(2, Math.floor(plotW / 82))));
+  candles.forEach((candle, i) => {
+    if (i % labelEvery) return;
+    const px = Math.round(x(i)) + 0.5;
+    ctx.strokeStyle = "#161c23";
+    ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, top + priceH); ctx.stroke();
+    const label = (candle.t || "").slice(0, 8);
+    const labelX = Math.min(Math.max(px - ctx.measureText(label).width / 2, left), left + plotW - 52);
+    ctx.fillStyle = "#8c98a8";
+    ctx.fillText(label, labelX, height - 6);
+  });
+
+  candles.forEach((candle, i) => {
+    const rising = candle.close >= candle.open;
+    const colour = rising ? "#2fbf71" : "#ff5c5c";
+    const px = x(i);
+
+    ctx.strokeStyle = colour; ctx.fillStyle = colour; ctx.lineWidth = 1;
+    ctx.beginPath();                                        // wick
+    ctx.moveTo(Math.round(px) + 0.5, y(candle.high));
+    ctx.lineTo(Math.round(px) + 0.5, y(candle.low));
+    ctx.stroke();
+
+    const openY = y(candle.open), closeY = y(candle.close);  // body
+    const bodyTop = Math.min(openY, closeY);
+    ctx.fillRect(px - bodyW / 2, bodyTop, bodyW, Math.max(1, Math.abs(closeY - openY)));
+
+    const vh = (candle.volume / peakVolume) * volumeH;       // volume strip
+    ctx.globalAlpha = 0.45;
+    ctx.fillRect(px - bodyW / 2, volumeTop + volumeH - vh, bodyW, vh);
+    ctx.globalAlpha = 1;
+  });
+
+  if (lastPrice !== null && lastPrice !== undefined) {
+    const py = Math.round(y(lastPrice)) + 0.5;
+    ctx.strokeStyle = "#4da3ff"; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(left + plotW, py); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#4da3ff";
+    ctx.fillRect(left + plotW + 2, py - 8, right - 4, 16);
+    ctx.fillStyle = "#06101c";
+    ctx.fillText(fmt(lastPrice, 1), left + plotW + 7, py + 3);
+  }
+}
+
+function renderBook(book, lastTradePrice, mid) {
+  const asks = (book.asks || []), bids = (book.bids || []);
   const depth = (l) => (l.cumulative === undefined ? l.quantity : l.cumulative);
   const peak = Math.max(1, ...[...asks, ...bids].map(depth));
   const row = (level, side) => `<tr>
-      <td style="width:44%"><span class="bar" style="background:var(--${side});width:${(depth(level) / peak) * 100}%"></span>
-      <span class="${side}">${fmt(level.price, 0)}</span></td>
+      <td class="${side}" style="width:38%">${fmt(level.price, 0)}</td>
       <td class="num" style="color:var(--muted)">${level.quantity.toLocaleString()}</td>
-      <td class="num">${depth(level).toLocaleString()}</td></tr>`;
-  $("ladder").innerHTML = asks.map((l) => row(l, "sell")).join("")
-    + `<tr class="midrow"><td colspan="3">— mid ${fmt(mid, 1)} —</td></tr>`
-    + bids.map((l) => row(l, "buy")).join("");
+      <td class="num" style="position:relative">
+        <span class="bar" style="background:var(--${side});width:${(depth(level) / peak) * 100}%"></span>
+        ${depth(level).toLocaleString()}</td></tr>`;
+
+  // Asks descend towards the touch, bids continue down: the classic ladder.
+  $("askRows").innerHTML = asks.slice().reverse().map((l) => row(l, "sell")).join("");
+  $("bidRows").innerHTML = bids.map((l) => row(l, "buy")).join("");
+
+  const price = lastTradePrice ?? mid;
+  const rising = mid === null || mid === undefined || price === null || price === undefined || price >= mid;
+  $("lastPrice").textContent = price === null || price === undefined ? "—" : fmt(price, 1);
+  $("lastPrice").className = rising ? "buy" : "sell";
+  const spread = asks.length && bids.length ? asks[0].price - bids[0].price : null;
+  $("spreadInfo").textContent = spread === null ? "" : `spread ${fmt(spread, 1)} · mid ${fmt(mid, 1)}`;
+}
+
+function renderTape(trades) {
+  $("tape").innerHTML = (trades || []).slice(0, 26).map((t) => `<tr>
+      <td style="color:var(--muted)">${(t.t || "").slice(0, 8)}</td>
+      <td class="num ${t.side === "BUY" ? "buy" : "sell"}">${fmt(t.price, 1)}</td>
+      <td class="num">${t.quantity.toLocaleString()}</td></tr>`).join("");
 }
 
 function render(payload) {
   latest = payload;
   const telemetry = payload.telemetry;
-  $("state").textContent = payload.state;
   $("state").className = "pill " + payload.state;
-  $("start").disabled = ["STARTING", "READY", "RUNNING", "DRAINING"].includes(payload.state);
+  const live = ["STARTING", "READY", "RUNNING", "DRAINING"].includes(payload.state);
+  $("start").disabled = live;
+  $("pause").disabled = !live;
+  $("pause").textContent = payload.paused ? "Resume" : "Pause";
+  // Paused is not a session state, so say so next to the state pill instead.
+  $("state").textContent = payload.paused ? payload.state + " · PAUSED" : payload.state;
   $("clock").textContent = telemetry?.simulation_time ? "sim " + telemetry.simulation_time : "—";
   if (!telemetry) return;
 
@@ -353,14 +578,15 @@ function render(payload) {
   const strategies = telemetry.strategies || [];
 
   if ($("live").classList.contains("active")) {
-    chart($("priceChart"), [
-      {color: "#2fbf71", style: "dotted", points: series.map((p) => p.bid)},
-      {color: "#ff5c5c", style: "dotted", points: series.map((p) => p.ask)},
-      {color: "#4da3ff", width: 1.4, points: series.map((p) => p.mid)},
-      {color: "#ffc857", style: "dots", radius: 2.1, points: series.map((p) => p.trade)},
-    ], labels);
+    sizeCharts();
+    const candles = toCandles(series);
+    drawCandles($("priceChart"), candles, telemetry.last_trade_price ?? telemetry.last_mid);
+    $("candleInfo").textContent = candles.length
+      ? `${candles.length} candles · ${Math.max(1, Math.ceil(series.length / CANDLE_TARGET))} snapshots each · volume = trades`
+      : "";
 
-    renderLadder(telemetry.book || {}, telemetry.last_mid);
+    renderBook(telemetry.book || {}, telemetry.last_trade_price, telemetry.last_mid);
+    renderTape(telemetry.trades);
 
     const names = strategies.map((s) => s.strategy_id);
     chart($("pnlChart"), names.map((name, i) => ({
@@ -380,8 +606,6 @@ function render(payload) {
         <td class="num">${s.live_orders}</td><td class="num">${s.orders}</td><td class="num">${s.fills}</td>
       </tr>`).join("");
 
-    $("trades").innerHTML = (telemetry.trades || []).map((t) =>
-      `<tr><td>${t.t}</td><td class="${t.side.toLowerCase()}">${t.side}</td><td class="num">${fmt(t.price, 0)}</td><td class="num">${t.quantity}</td></tr>`).join("");
     $("execs").innerHTML = (telemetry.executions || []).map((e) =>
       `<tr><td>${e.t}</td><td>${e.order_id}</td><td class="${e.side.toLowerCase()}">${e.side}</td><td class="num">${fmt(e.price, 0)}</td><td class="num">${e.quantity}</td></tr>`).join("");
     $("orders").innerHTML = (telemetry.orders || []).map((o) =>
@@ -405,11 +629,40 @@ function render(payload) {
   }
 }
 
+async function refreshLogs() {
+  if (!$("logs").classList.contains("active")) return;
+
+  const filter = $("logFilter").value.trim();
+  const query = filter ? `?limit=400&contains=${encodeURIComponent(filter)}` : "?limit=400";
+  try {
+    const payload = await (await fetch(`/api/logs${query}`)).json();
+    $("logPath").textContent = payload.path || "no run yet";
+    $("logView").textContent = payload.lines.length
+      ? payload.lines.join("\n")
+      : (filter ? `No lines matching ${filter}` : "Log is empty so far.");
+    if ($("logFollow").checked) {
+      const scroller = $("logScroll");
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  } catch (error) {
+    $("logView").textContent = `Could not read the log: ${error}`;
+  }
+}
+
+setInterval(refreshLogs, 1000);
+$("logFilter").oninput = refreshLogs;
+
 function connect() {
   const source = new EventSource("/api/stream");
   source.onmessage = (event) => render(JSON.parse(event.data));
   source.onerror = () => { source.close(); setTimeout(connect, 2000); };
 }
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (latest) render(latest); }, 120);
+});
 
 loadOptions().then(connect);
 </script>

@@ -61,7 +61,7 @@ def _run(controller: SessionController, timeout: float) -> dict:
     return controller.snapshot()
 
 
-def _config(tmp_path: Path, rows: int, rate: float) -> SessionConfig:
+def _config(tmp_path: Path, rows: int, rate: float, **overrides) -> SessionConfig:
     data_path = tmp_path / "md.csv.gz"
     _write_fixture(data_path, rows)
     return SessionConfig(
@@ -72,6 +72,7 @@ def _config(tmp_path: Path, rows: int, rate: float) -> SessionConfig:
         heartbeat_snapshots=20,
         output_root=str(tmp_path / "runs"),
         strategies=(STRATEGY,),
+        **overrides,
     )
 
 
@@ -132,3 +133,26 @@ def test_shutdown_is_idempotent(tmp_path: Path) -> None:
     session.shutdown(timeout=5.0)
 
     assert all(not c["alive"] for c in session.snapshot()["components"])
+
+
+def test_realism_extensions_run_end_to_end(tmp_path: Path, controller: SessionController) -> None:
+    """Queue turnover and market impact must survive a real multi-process run.
+
+    They are off in the baseline demo, so nothing else covers them with actual
+    component processes and the real bus.
+    """
+    controller.start(_config(
+        tmp_path, rows=400, rate=0.0,
+        queue_turnover=True,
+        market_impact_ticks_per_level=1,
+    ))
+
+    snapshot = _run(controller, timeout=90.0)
+
+    assert snapshot["state"] == SessionState.COMPLETED, snapshot["error"]
+    assert [c["name"] for c in snapshot["components"] if c["exitcode"] not in (0, None)] == []
+    assert snapshot["telemetry"]["counters"]["snapshots"] == 400
+
+    run_config = json.loads((Path(snapshot["output_dir"]) / "run-config.json").read_text())
+    assert run_config["queue_turnover"] is True
+    assert run_config["market_impact_ticks_per_level"] == 1

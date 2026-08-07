@@ -10,7 +10,7 @@ from sortedcontainers import SortedDict
 from exchange_simulator.matching_engine.market_impact.models import MarketImpactModel
 from exchange_simulator.schemas.common import Side, OrderType
 from exchange_simulator.schemas.instrument import Instrument
-from exchange_simulator.schemas.market_data import MarketDataSnapshot
+from exchange_simulator.schemas.market_data import MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.matching_engine import BookOrder, MutableBookLevel, OrderBookResult
 from exchange_simulator.matching_engine.utils.execution_utils import build_execution_report, build_trade
 
@@ -19,9 +19,11 @@ _logger = logging.getLogger(__name__)
 
 class OrderBook:
 
-    def __init__(self, instrument: Instrument, market_impact_model: MarketImpactModel):
+    def __init__(self, instrument: Instrument, market_impact_model: MarketImpactModel,
+                 queue_turnover: bool = False):
         self._instrument: Instrument = instrument
         self._market_impact_model: MarketImpactModel = market_impact_model
+        self._queue_turnover: bool = queue_turnover
         self.order_cache: Dict[str, BookOrder] = {}
         self.bid_price_level_order_cache: SortedDict[Decimal, OrderedDict[str, BookOrder]] = SortedDict()
         self.ask_price_level_order_cache: SortedDict[Decimal, OrderedDict[str, BookOrder]] = SortedDict()
@@ -33,6 +35,14 @@ class OrderBook:
         self.market_data_bid_levels: Deque[MutableBookLevel] = deque()
         self.market_data_ask_levels: Deque[MutableBookLevel] = deque()
 
+        # Queue-turnover state: displayed external volume resting ahead of us at
+        # each of our own price levels, and the raw snapshot quantities it is
+        # seeded from. Only maintained when queue turnover is enabled.
+        self.external_queue_ahead: Dict[Side, Dict[Decimal, int]] = {Side.BUY: {}, Side.SELL: {}}
+        self._last_raw_bid_quantities: Dict[Decimal, int] = {}
+        self._last_raw_ask_quantities: Dict[Decimal, int] = {}
+        self._has_market_snapshot: bool = False
+
     def add_order(self, order: BookOrder) -> OrderBookResult:
         result = self._match_incoming_order(order)
 
@@ -43,13 +53,22 @@ class OrderBook:
             _logger.debug("Market order %s partially filled/unfilled. Cancelling remaining quantity %s", order.order_id, order.remaining_quantity)
             return result
 
+        if order.price is None:
+            raise ValueError(f"Limit order {order.order_id!r} has no price")
+
         self.order_cache[order.order_id] = order
 
         price_level_cache = self.price_level_cache_getter[order.side]
         if order.price not in price_level_cache:
             price_level_cache[order.price] = OrderedDict()
 
+        # A newly posted order joins the back of the queue: everything currently
+        # displayed at its price is ahead of it.
+        if self._queue_turnover and order.price not in self.external_queue_ahead[order.side]:
+            self.external_queue_ahead[order.side][order.price] = self._raw_market_quantity_at_price(order.side, order.price)
+
         price_level_cache[order.price][order.order_id] = order
+        self._sync_queue_ahead(order.side, order.price)
         _logger.debug("Added order %s to order book with remaining quantity %s", order.order_id, order.remaining_quantity)
         return result
 
@@ -68,15 +87,140 @@ class OrderBook:
         orders_at_price_level.pop(order_id, None)
         if not orders_at_price_level:
             price_level_cache.pop(order.price, None)
+            self.external_queue_ahead[order.side].pop(order.price, None)
+        else:
+            self._sync_queue_ahead(order.side, order.price)
         return order
 
     def on_market_data_snapshot(self, market_data_snapshot: MarketDataSnapshot) -> OrderBookResult:
         result = OrderBookResult()
+        is_first_snapshot = not self._has_market_snapshot
         self._update_market_data_levels(market_data_snapshot)
+        self._last_raw_bid_quantities = {level.price: level.quantity for level in market_data_snapshot.bids}
+        self._last_raw_ask_quantities = {level.price: level.quantity for level in market_data_snapshot.asks}
+        self._has_market_snapshot = True
+
+        # Orders posted before any snapshot arrived have no displayed volume to
+        # measure against; seed them from the first book we see.
+        if is_first_snapshot and self._queue_turnover:
+            self._seed_existing_orders_from_first_snapshot()
 
         result.extend(self._match_resting_buy_orders_against_market_asks(market_data_snapshot.timestamp))
         result.extend(self._match_resting_sell_orders_against_market_bids(market_data_snapshot.timestamp))
         return result
+
+    def on_market_trade_print(self, market_trade_print: MarketTradePrint) -> OrderBookResult:
+        """Turn a historical trade print into queue progress, then into fills.
+
+        A print at our price means the queue at that price moved. It first
+        consumes the external volume ahead of us; only what is left over reaches
+        our resting orders, which is the whole point of the model — being at a
+        price is not the same as having traded at it.
+        """
+        if not self._queue_turnover:
+            return OrderBookResult()
+
+        aggressor_side = self._infer_aggressor_side(market_trade_print.price)
+        if aggressor_side is None:
+            return OrderBookResult()
+
+        resting_side = Side.BUY if aggressor_side is Side.SELL else Side.SELL
+        internal_cache = self.price_level_cache_getter[resting_side]
+        return self._process_trade_print_turnover(market_trade_print, internal_cache, resting_side, aggressor_side)
+
+    def _infer_aggressor_side(self, price: Decimal) -> Optional[Side]:
+        """Classify a print from the prevailing touch.
+
+        The feed carries no aggressor flag, so a print at or above the best ask
+        is taken as buyer-initiated and one at or below the best bid as
+        seller-initiated. Prints strictly inside the spread are unclassifiable
+        and are ignored rather than guessed.
+        """
+        best_bid = self.market_data_bid_levels[0].price if self.market_data_bid_levels else None
+        best_ask = self.market_data_ask_levels[0].price if self.market_data_ask_levels else None
+
+        if best_ask is not None and price >= best_ask:
+            return Side.BUY
+        if best_bid is not None and price <= best_bid:
+            return Side.SELL
+
+        return None
+
+    def _process_trade_print_turnover(self, market_trade_print: MarketTradePrint,
+                                     internal_cache: SortedDict[Decimal, OrderedDict[str, BookOrder]],
+                                     resting_side: Side, aggressor_side: Side) -> OrderBookResult:
+        result = OrderBookResult()
+        price = market_trade_print.price
+        orders_at_price = internal_cache.get(price)
+        if not orders_at_price:
+            return result
+
+        turnover_quantity = market_trade_print.quantity
+        external_queue = self.external_queue_ahead[resting_side].get(price, 0)
+        consumed_external = min(turnover_quantity, external_queue)
+        self.external_queue_ahead[resting_side][price] = external_queue - consumed_external
+        turnover_quantity -= consumed_external
+
+        if consumed_external:
+            _logger.debug(
+                "Queue turnover: print of %s at %s consumed %s ahead of us; queue ahead now %s",
+                market_trade_print.quantity, price, consumed_external,
+                self.external_queue_ahead[resting_side][price],
+            )
+
+        for order_id in list(orders_at_price.keys()):
+            if turnover_quantity <= 0:
+                break
+
+            order = orders_at_price[order_id]
+            fill_quantity = min(order.remaining_quantity, turnover_quantity)
+            if fill_quantity <= 0:
+                continue
+
+            self._add_execution_events(result, order, aggressor_side, price, fill_quantity, market_trade_print.timestamp)
+            order.remaining_quantity -= fill_quantity
+            turnover_quantity -= fill_quantity
+            _logger.info(
+                "Queue turnover filled order %s: %s at %s from a print of %s; the queue ahead was exhausted",
+                order.order_id, fill_quantity, price, market_trade_print.quantity,
+            )
+
+            if order.remaining_quantity <= 0:
+                removed_order = self.cancel_order(order_id)
+                if removed_order is not None:
+                    result.removed_order_ids.append(order_id)
+
+        self._sync_queue_ahead(resting_side, price)
+        return result
+
+    def _raw_market_quantity_at_price(self, side: Side, price: Decimal) -> int:
+        raw_quantities = self._last_raw_bid_quantities if side == Side.BUY else self._last_raw_ask_quantities
+        return raw_quantities.get(price, 0)
+
+    def _seed_existing_orders_from_first_snapshot(self) -> None:
+        for side, price_level_cache in self.price_level_cache_getter.items():
+            for price in price_level_cache:
+                self.external_queue_ahead[side][price] = self._raw_market_quantity_at_price(side, price)
+                self._sync_queue_ahead(side, price)
+
+    def _sync_queue_ahead(self, side: Side, price: Decimal) -> None:
+        """Restate each order's queue position after the level changed."""
+        if not self._queue_turnover:
+            return
+
+        orders_at_price = self.price_level_cache_getter[side].get(price)
+        if not orders_at_price:
+            self.external_queue_ahead[side].pop(price, None)
+            return
+
+        queue_ahead = self.external_queue_ahead[side].get(price, 0)
+        for order in orders_at_price.values():
+            order.queue_ahead = queue_ahead
+            queue_ahead += order.remaining_quantity
+
+    def _is_blocked_by_queue_ahead(self, side: Side, price: Decimal) -> bool:
+        """True while displayed external volume at our price is still unfilled."""
+        return self._queue_turnover and self.external_queue_ahead[side].get(price, 0) > 0
 
     def _update_market_data_levels(self, market_data_snapshot: MarketDataSnapshot) -> None:
         self.market_data_bid_levels = deque(
@@ -197,6 +341,10 @@ class OrderBook:
 
             if order.remaining_quantity <= 0:
                 break
+
+        if opp_order is not None and opp_order.price is not None:
+            self._sync_queue_ahead(opp_order.side, opp_order.price)
+
         return result
 
     def _execute_order_against_market_level(
@@ -226,6 +374,11 @@ class OrderBook:
             if best_bid_price < best_market_ask_level.price:
                 break
 
+            # At the touch our order is behind the displayed queue; a snapshot
+            # alone is not evidence that the queue reached us.
+            if best_bid_price == best_market_ask_level.price and self._is_blocked_by_queue_ahead(Side.BUY, best_bid_price):
+                break
+
             for order_id in list(buy_orders_at_price.keys()):
                 order = buy_orders_at_price[order_id]
                 if order.price is None:
@@ -245,6 +398,8 @@ class OrderBook:
                     self.market_data_ask_levels.popleft()
                     break
 
+            self._sync_queue_ahead(Side.BUY, best_bid_price)
+
         return result
 
     def _match_resting_sell_orders_against_market_bids(self, market_data_snapshot_timestamp: dt.datetime) -> OrderBookResult:
@@ -259,6 +414,9 @@ class OrderBook:
                 continue
 
             if best_ask_price > best_market_bid_level.price:
+                break
+
+            if best_ask_price == best_market_bid_level.price and self._is_blocked_by_queue_ahead(Side.SELL, best_ask_price):
                 break
 
             for order_id in list(sell_orders_at_price.keys()):
@@ -279,6 +437,8 @@ class OrderBook:
                 if best_market_bid_level.quantity <= 0:
                     self.market_data_bid_levels.popleft()
                     break
+
+            self._sync_queue_ahead(Side.SELL, best_ask_price)
 
         return result
 

@@ -1,6 +1,14 @@
+import csv
+import gzip
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple
+
+from exchange_simulator.matching_engine.market_impact.models import (
+    MarketDepthImpactModel,
+    MarketImpactModel,
+    NoImpactModel,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "var"
@@ -35,6 +43,15 @@ class SessionConfig:
     heartbeat_snapshots: int = 200
     output_root: str = str(DEFAULT_OUTPUT_ROOT)
     strategies: Tuple[StrategyConfig, ...] = DEFAULT_STRATEGIES
+    # Queue turnover is on by default: passive fills respect queue position.
+    #
+    # The extra slippage penalty is off, because the engine already prices depth
+    # consumption exactly -- an aggressive order walks the book level by level
+    # and pays each level's own price. A tick penalty on top would charge twice
+    # for the same effect. It stays available for runs that want to price
+    # liquidity beyond the five visible levels.
+    market_impact_ticks_per_level: int = 0
+    queue_turnover: bool = True
 
     @property
     def enabled_strategies(self) -> Tuple[StrategyConfig, ...]:
@@ -61,6 +78,8 @@ class SessionConfig:
             "replay_interval_seconds": self.replay_interval_seconds,
             "heartbeat_snapshots": self.heartbeat_snapshots,
             "output_root": self.output_root,
+            "market_impact_ticks_per_level": self.market_impact_ticks_per_level,
+            "queue_turnover": self.queue_turnover,
             "strategies": [
                 {
                     "strategy_id": strategy.strategy_id,
@@ -71,6 +90,50 @@ class SessionConfig:
                 for strategy in self.strategies
             ],
         }
+
+
+def build_market_impact_model(config: SessionConfig) -> MarketImpactModel:
+    """The slippage model for this session.
+
+    Zero ticks per level means execution prices come straight from the book,
+    which is the baseline demo behaviour.
+    """
+    if config.market_impact_ticks_per_level <= 0:
+        return NoImpactModel()
+
+    return MarketDepthImpactModel(tick_penalty_per_level=config.market_impact_ticks_per_level)
+
+
+def describe_data_files() -> List[Dict[str, Any]]:
+    """Each replayable file with the instrument and first day it contains.
+
+    The dashboard uses this to pre-select the right instrument and a date that
+    actually exists in the chosen file, since the two are not interchangeable:
+    every instrument has its own tick size, and a date outside the file replays
+    nothing. The instrument comes from the ``<id>_md_<from>_<to>`` filename and
+    the date from the first data row, so nothing has to scan a whole file.
+    """
+    described: List[Dict[str, Any]] = []
+    for path in list_data_files():
+        name = Path(path).name
+        described.append({
+            "path": path,
+            "name": name,
+            "instrument_id": name.split("_", 1)[0] or None,
+            "first_date": _first_date(path),
+        })
+    return described
+
+
+def _first_date(path: str) -> str | None:
+    opener = gzip.open if path.endswith(".gz") else open
+    try:
+        with opener(path, "rt", newline="") as handle:
+            for row in csv.DictReader(handle):
+                return row.get("date") or None
+    except (OSError, csv.Error):
+        return None
+    return None
 
 
 def list_data_files() -> List[str]:

@@ -31,7 +31,7 @@ from exchange_simulator.strategies.runner import component_name as strategy_comp
 from exchange_simulator.strategies.runner import run_strategy_component
 from exchange_simulator.system_controller import Component, SessionState
 from exchange_simulator.system_controller.component_specs import build_all_component_specs
-from exchange_simulator.system_controller.config import SessionConfig
+from exchange_simulator.system_controller.config import SessionConfig, build_market_impact_model
 from exchange_simulator.system_controller.dashboard.telemetry import TelemetryHub
 from exchange_simulator.trading_platform.platform import run_trading_platform_component
 
@@ -71,6 +71,9 @@ class SessionController:
         # Stopping the producer and draining the consumers are separate acts:
         # the matching engine exits on shutdown without draining its inbox.
         self._feed_stop_event: Any = None
+        # Pausing holds the feed between rows; it is not a lifecycle state, so it
+        # lives beside the stop events rather than in SessionState.
+        self._pause_event: Any = None
         self._stop_requested = threading.Event()
         self._telemetry: Optional[TelemetryHub] = None
         self._supervisor: Optional[threading.Thread] = None
@@ -99,6 +102,21 @@ class SessionController:
                 self._state = SessionState.FAILED
                 self._error = str(exc)
             raise
+
+    def pause(self) -> None:
+        """Hold the feed between rows, leaving every component's state intact."""
+        if self._pause_event is not None and self.state in _ACTIVE_STATES:
+            self._pause_event.set()
+            _logger.info("Replay paused by operator")
+
+    def resume(self) -> None:
+        if self._pause_event is not None:
+            self._pause_event.clear()
+            _logger.info("Replay resumed by operator")
+
+    @property
+    def paused(self) -> bool:
+        return self._pause_event is not None and self._pause_event.is_set()
 
     def stop(self) -> None:
         with self._lock:
@@ -132,6 +150,7 @@ class SessionController:
                 "state": str(self._state),
                 "run_id": self._run_id,
                 "output_dir": str(self._output_dir) if self._output_dir else None,
+                "paused": self.paused,
                 "error": self._error,
                 "config": self._config.to_dict() if self._config else None,
                 "components": self._component_health(),
@@ -154,6 +173,7 @@ class SessionController:
         self._ready_events = {}
         self._terminated = set()
         self._feed_stop_event = None
+        self._pause_event = None
         self._stop_requested = threading.Event()
         self._started_at = None
         self._finished_at = None
@@ -193,6 +213,7 @@ class SessionController:
         self._start_event = mp.Event()
         self._shutdown_event = mp.Event()
         self._feed_stop_event = mp.Event()
+        self._pause_event = mp.Event()
 
         processes: Dict[str, mp.Process] = {
             Component.MARKET_DATA_FEED: mp.Process(
@@ -207,6 +228,7 @@ class SessionController:
                     config.date,
                     config.replay_interval_seconds,
                     self._ready_event(Component.MARKET_DATA_FEED),
+                    self._pause_event,
                 ),
             ),
             Component.MATCHING_ENGINE: mp.Process(
@@ -216,8 +238,9 @@ class SessionController:
                     topology.create_component_bus(Component.MATCHING_ENGINE),
                     self._start_event,
                     self._shutdown_event,
-                    None,
+                    build_market_impact_model(config),
                     self._ready_event(Component.MATCHING_ENGINE),
+                    config.queue_turnover,
                 ),
             ),
             Component.TRADING_PLATFORM: mp.Process(

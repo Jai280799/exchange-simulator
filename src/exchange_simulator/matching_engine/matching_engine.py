@@ -14,7 +14,7 @@ from exchange_simulator.messaging.topics import RequestTopic, StateTopic, Topic,
 from exchange_simulator.schemas.common import OrderResponseStatus, OrderType
 from exchange_simulator.schemas.executions import ExecutionReport, Trade
 from exchange_simulator.schemas.instrument import Instrument
-from exchange_simulator.schemas.market_data import MarketDataSnapshot
+from exchange_simulator.schemas.market_data import MarketDataSnapshot, MarketTradePrint
 from exchange_simulator.schemas.order import CreateOrderRequest, CancelOrderRequest, OrderResponse
 from exchange_simulator.logging_config import configure_logging
 
@@ -24,12 +24,18 @@ _logger = logging.getLogger(__name__)
 class MatchingEngine:
 
     def __init__(self, market_impact_model: MarketImpactModel, bus: ComponentMessageBus,
-                 instruments: Optional[Dict[str, Instrument]] = None):
+                 instruments: Optional[Dict[str, Instrument]] = None,
+                 queue_turnover: bool = False):
         self._market_impact_model: MarketImpactModel = market_impact_model
+        self._queue_turnover: bool = queue_turnover
         self._bus: ComponentMessageBus = bus
         self._order_book_cache: Dict[str, OrderBook] = {}
         self._live_order_cache: Dict[str, BookOrder] = {}
         self._order_id_cache: Set[str] = set()
+
+        # The replay clock, taken from the market data. Responses must be stamped
+        # with it: wall-clock time would put today's hour on a 2021 order.
+        self._simulation_time: Optional[dt.datetime] = None
 
         self._instruments: Dict[str, Instrument] = load_instruments() if instruments is None else instruments
 
@@ -54,6 +60,8 @@ class MatchingEngine:
                     self._process_cancel_order_request(message)
                 case StateTopic.MARKET_DATA:
                     self._process_market_data_snapshot(message)
+                case StateTopic.MARKET_TRADES:
+                    self._process_market_trade_print(message)
                 case _:
                     raise ValueError(f"Received message on unexpected topic: {topic}. Please contact developer.")
         except Exception:
@@ -67,7 +75,7 @@ class MatchingEngine:
         try:
             self._validate_create_order_request(create_order_request, instrument)
         except CreateOrderRequestValidationError as e:
-            order_response = OrderResponse(create_order_request.order_id, OrderResponseStatus.REJECTED, dt.datetime.now(), str(e))
+            order_response = OrderResponse(create_order_request.order_id, OrderResponseStatus.REJECTED, self._response_time(create_order_request.timestamp), str(e))
             self._publish_response(ResponseTopic.CREATE_ORDER, order_response)
             return
 
@@ -90,7 +98,7 @@ class MatchingEngine:
         if book_order.remaining_quantity > 0 and book_order.order_type != OrderType.MARKET:
             self._live_order_cache[book_order.order_id] = book_order
 
-        order_response = OrderResponse(create_order_request.order_id, OrderResponseStatus.ACCEPTED, dt.datetime.now(), "Order accepted.")
+        order_response = OrderResponse(create_order_request.order_id, OrderResponseStatus.ACCEPTED, self._response_time(create_order_request.timestamp), "Order accepted.")
         self._publish_response(ResponseTopic.CREATE_ORDER, order_response)
         self._publish_order_book_result(order_book_result)
 
@@ -100,7 +108,7 @@ class MatchingEngine:
         try:
             book_order = self._validate_cancel_order_request(cancel_order_request)
         except CancelOrderRequestValidationError as e:
-            order_response = OrderResponse(cancel_order_request.order_id, OrderResponseStatus.REJECTED, dt.datetime.now(), str(e))
+            order_response = OrderResponse(cancel_order_request.order_id, OrderResponseStatus.REJECTED, self._response_time(cancel_order_request.timestamp), str(e))
             self._publish_response(ResponseTopic.CANCEL_ORDER, order_response)
             return
 
@@ -109,7 +117,7 @@ class MatchingEngine:
             raise RuntimeError(f"Live order {cancel_order_request.order_id!r} could not be cancelled from the order book")
 
         self._live_order_cache.pop(cancel_order_request.order_id)
-        order_response = OrderResponse(cancel_order_request.order_id, OrderResponseStatus.ACCEPTED, dt.datetime.now(), "Order cancelled.")
+        order_response = OrderResponse(cancel_order_request.order_id, OrderResponseStatus.ACCEPTED, self._response_time(cancel_order_request.timestamp), "Order cancelled.")
         self._publish_response(ResponseTopic.CANCEL_ORDER, order_response)
 
     def _validate_create_order_request(self, create_order_request: CreateOrderRequest, instrument: Optional[Instrument]) -> None:
@@ -144,6 +152,9 @@ class MatchingEngine:
 
     def _process_market_data_snapshot(self, market_data_snapshot: MarketDataSnapshot) -> None:
         _logger.debug("Received market data snapshot: %s", market_data_snapshot)
+        if self._simulation_time is None or market_data_snapshot.timestamp > self._simulation_time:
+            self._simulation_time = market_data_snapshot.timestamp
+
         order_book_result = self._get_or_create_order_book(
             market_data_snapshot.instrument_id
         ).on_market_data_snapshot(market_data_snapshot)
@@ -151,13 +162,36 @@ class MatchingEngine:
         self._process_removed_order_ids(order_book_result)
         self._publish_order_book_result(order_book_result)
 
+    def _process_market_trade_print(self, market_trade_print: MarketTradePrint) -> None:
+        """Historical prints advance the external queue ahead of our orders."""
+        if not self._queue_turnover:
+            return
+
+        _logger.debug("Received market trade print: %s", market_trade_print)
+        order_book_result = self._get_or_create_order_book(
+            market_trade_print.instrument_id
+        ).on_market_trade_print(market_trade_print)
+
+        self._process_removed_order_ids(order_book_result)
+        self._publish_order_book_result(order_book_result)
+
+    def _response_time(self, request_timestamp: dt.datetime) -> dt.datetime:
+        """When the engine handled a request, on the replay clock.
+
+        Never earlier than the request itself, so a response cannot appear to
+        precede the order it answers.
+        """
+        if self._simulation_time is None:
+            return request_timestamp
+        return max(self._simulation_time, request_timestamp)
+
     def _get_or_create_order_book(self, instrument_id: str) -> OrderBook:
         instrument = self._instruments.get(instrument_id)
         if instrument is None:
             raise ValueError(f"Instrument with ID {instrument_id} does not exist.")
 
         if instrument_id not in self._order_book_cache:
-            self._order_book_cache[instrument_id] = OrderBook(instrument, self._market_impact_model)
+            self._order_book_cache[instrument_id] = OrderBook(instrument, self._market_impact_model, self._queue_turnover)
 
         return self._order_book_cache[instrument_id]
 
@@ -182,11 +216,11 @@ class MatchingEngine:
         self._bus.publish(StateTopic.EXECUTION_REPORT, execution_report)
 
 
-def run_matching_engine_component(bus: ComponentMessageBus, start_event: Event, shutdown_event: Event, market_impact_model: Optional[MarketImpactModel] = None, ready_event: Optional[Event] = None) -> None:
+def run_matching_engine_component(bus: ComponentMessageBus, start_event: Event, shutdown_event: Event, market_impact_model: Optional[MarketImpactModel] = None, ready_event: Optional[Event] = None, queue_turnover: bool = False) -> None:
     configure_logging()
     if market_impact_model is None:
         market_impact_model = NoImpactModel()
-    engine = MatchingEngine(market_impact_model, bus)
+    engine = MatchingEngine(market_impact_model, bus, queue_turnover=queue_turnover)
     if ready_event is not None:
         ready_event.set()
     engine.run(start_event, shutdown_event)
