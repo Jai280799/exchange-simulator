@@ -10,12 +10,15 @@ __pycache__/
 
 # AI
 AGENTS.md
-
-# Local data / run artifacts
-var/
-runs/
 MEMORY.md
 MEMORY_ARCHIVE.md
 PREFERENCE.md
+
+# Local data and run artifacts
 var/
 runs/
+
+# Presentation artifacts: large, binary, and not the source of truth
+*.pptx
+*.pdf
+Archive/

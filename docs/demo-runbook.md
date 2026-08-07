@@ -1,7 +1,7 @@
 # Demo runbook
 
-Status: **Implemented in flight (PR #28), except `positions.csv`**
-Last updated: **2026-08-01**
+Status: **Implemented**
+Last updated: **2026-08-07**
 
 ## Objective
 
@@ -13,17 +13,20 @@ The demo should use the same application entry point and component wiring as
 normal end-to-end testing. It must not depend on manually starting individual
 modules in the correct order.
 
-## Target command
-
-The intended interface is:
+## Launch command
 
 ```bash
-python -m exchange_simulator --config configs/demo.toml --output runs/demo
+python -m exchange_simulator
 ```
 
-This command is a target contract, not a description of the current
-implementation. The exact flags may change, but the final demo must remain a
-single-command launch.
+This starts the control plane and dashboard on <http://127.0.0.1:8000>. The
+session itself — dataset, instrument, date, replay pace, strategies, and the
+realism settings — is chosen in the browser and posted to
+`/api/session/start`, so no configuration file is needed and the launch stays a
+single command. `--host` and `--port`, or the matching environment variables,
+move the listener.
+
+Run artifacts are written to `runs/<run-id>/`, one directory per session.
 
 ## Required lifecycle
 
@@ -147,7 +150,8 @@ open — a quiet inbox is inferred, not confirmed.
 2. Test each producer-consumer message contract through the real messaging layer.
 3. Run a short end-to-end smoke test with a small fixture through the same
    application entry point used for the demo.
-4. Rehearse the complete presentation-duration run with `configs/demo.toml`.
+4. Rehearse the complete presentation-duration run at the pace intended for the
+   presentation, and confirm the dashboard stays readable throughout.
 
 The short smoke test should be suitable for CI. The full-duration rehearsal may
 remain a manual release check.
