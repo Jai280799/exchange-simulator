@@ -154,8 +154,10 @@ def create_app(
         to poll, and drops the first line of that slice because it is usually cut
         mid-message.
         """
-        output_dir = session.snapshot().get("output_dir")
-        if not output_dir:
+        # Deliberately not session.snapshot(): that builds the full telemetry
+        # payload, and this endpoint is polled every second for one path.
+        output_dir = session.output_dir
+        if output_dir is None:
             return {"path": None, "lines": []}
 
         path = Path(output_dir) / LOG_FILE_NAME

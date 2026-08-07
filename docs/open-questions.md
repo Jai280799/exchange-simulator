@@ -1,7 +1,7 @@
 # Open architecture questions
 
 Status: **Open**
-Last updated: **2026-08-02**
+Last updated: **2026-08-07**
 
 These questions are intentionally unresolved. Temporary behavior in a pull
 request does not settle them.
@@ -10,15 +10,20 @@ request does not settle them.
 
 | Priority | Question | Why it matters | Suggested owner | Needed before |
 |---|---|---|---|---|
-| 1 | How is the best executable price selected across strategy and historical liquidity? | Determines the matching abstraction and whether participant-first execution may give a worse price. | Jai + team | Final matching behavior |
+| ~~1~~ | ~~How is the best executable price selected across strategy and historical liquidity?~~ | **Resolved**: global best price, with internal liquidity preferred on a tie. | Jai + team | — |
 | ~~2~~ | ~~Where are cancellation ownership and execution-report routing enforced?~~ | **Resolved** by [ADR 0006](decisions/0006-strategy-processes-and-intent-channel.md): enforced in the trading platform. | Alex + Jai | — |
-| 3 | What price fills a resting strategy order when a later snapshot touches/crosses it? | Changes P&L and passive-fill realism. | Jai + team | Passive-fill tests |
+| ~~3~~ | ~~What price fills a resting strategy order when a later snapshot touches/crosses it?~~ | **Resolved**: at the resting order's own price, gated by queue position ([ADR 0008](decisions/0008-execution-realism-defaults.md)). | Jai + team | — |
 | ~~4~~ | ~~How is end-of-stream and shutdown coordinated?~~ | **Resolved** by [ADR 0007](decisions/0007-session-lifecycle-and-web-control.md): feed process exit is end of stream; drain on quiet counters. | Integration owner | — |
-| 5 | What replay pace and dataset should the demo use? | The system must stay observable throughout the presentation without overwhelming consumers. | Hyungmin + team | Full demo rehearsal |
+| ~~5~~ | ~~What replay pace and dataset should the demo use?~~ | **Resolved**: chosen per session in the dashboard; 500 rows per second is the readable default. | Hyungmin + team | — |
 | 6 | How are multiple instruments scheduled? | Determines whether feeds run independently or merge onto one event timeline. | Hyungmin | Multi-instrument milestone |
 | 7 | Is a reconstructed single-book/market-impact model in scope? | Higher realism, but substantial heuristic complexity and demo risk. | Team/professor | Post-MVP planning |
 
-## Q1: liquidity-source priority
+## Q1: liquidity-source priority — RESOLVED
+
+**Resolution:** global best price. Each iteration compares the best internal
+price with the best historical price and takes whichever is better for the
+incoming order, preferring internal liquidity when the two are equal, so our own
+resting orders are never skipped in favour of identically priced history.
 
 Example:
 
@@ -58,7 +63,13 @@ identity and enforcement in the matching layer.
 Recommended next step: Alex and Jai confirm the simple model and document the
 platform's order-to-strategy mapping.
 
-## Q3: resting-order fill price
+## Q3: resting-order fill price — RESOLVED
+
+**Resolution:** option 1, at the resting order's own price — a limit order fills
+at the price it posted, so no phantom price improvement appears. Option 3's
+concern is addressed separately by queue turnover, which requires historical
+prints to consume the volume ahead of the order before it fills. See
+[ADR 0008](decisions/0008-execution-realism-defaults.md).
 
 Under the snapshot-touch approximation, a bid resting at 100 may be crossed by a
 later historical ask of 99.
@@ -113,10 +124,17 @@ Full-speed replay is on `master`, and configurable fixed-interval replay is
 implemented in this change. The interval changes wall-clock publication timing
 without changing source timestamps or historical ordering.
 
-The remaining decision is which interval and dataset should be the presentation
-default, or whether a historical-delta/speed-multiplier mode is needed. It should
-produce useful activity for the expected presentation duration without changing
-the ordering promised by the replay.
+Fixed-interval replay is now the demo mechanism, chosen per session in the
+dashboard rather than fixed in code; 500 source rows per second is readable while
+presenting, and the feed can be paused between rows without ending the session.
+
+Two clock points are settled. Every timestamp in the order path comes from the
+replay clock: the engine stamps responses with the latest snapshot timestamp,
+never earlier than the request being answered, so operator wall-clock time cannot
+leak into `orders.csv`. What remains open is byte-reproducible replay — trade
+identifiers are random UUIDs, so two runs over the same input are equivalent but
+not identical. A historical-delta or speed-multiplier mode is still unbuilt and
+is not needed by any current claim.
 
 The operational acceptance criteria and rehearsal steps are in the
 [demo runbook](demo-runbook.md).

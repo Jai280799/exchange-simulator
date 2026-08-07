@@ -9,6 +9,7 @@ Accepted records:
 5. [Provide a one-command observable demo runtime](0005-one-command-demo-runtime.md)
 6. [One process per strategy behind an intent channel](0006-strategy-processes-and-intent-channel.md)
 7. [Session lifecycle and web-driven demo control](0007-session-lifecycle-and-web-control.md)
+8. [Execution realism defaults: queue turnover on, impact penalty off](0008-execution-realism-defaults.md)
 
 New records should use the next number and either supersede or link any earlier
 decision they change.

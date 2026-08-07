@@ -116,7 +116,17 @@ class SessionController:
 
     @property
     def paused(self) -> bool:
-        return self._pause_event is not None and self._pause_event.is_set()
+        """Only a live session can be paused; a finished one is just finished."""
+        return (
+            self._pause_event is not None
+            and self._pause_event.is_set()
+            and self._state in _ACTIVE_STATES
+        )
+
+    @property
+    def output_dir(self) -> Optional[Path]:
+        """Where this run writes, without building the whole session snapshot."""
+        return self._output_dir
 
     def stop(self) -> None:
         with self._lock:
@@ -422,6 +432,11 @@ class SessionController:
         ]
 
     def _finish(self, state: SessionState, error: Optional[str]) -> None:
+        # A pause is an operator hold on a running feed. Leaving it set past the
+        # end of the session would report a finished run as paused.
+        if self._pause_event is not None:
+            self._pause_event.clear()
+
         with self._lock:
             self._finished_at = dt.datetime.now()
             self._state = state
