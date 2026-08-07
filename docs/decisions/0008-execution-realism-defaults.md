@@ -63,6 +63,10 @@ enough to trade at it.
   reconstructed.
 - External cancels ahead of us are invisible in five-level aggregate data. A level
   shrinking without a print is treated as unchanged, which stays conservative.
+- Queue position survives the level leaving the book. If the price moves away and
+  later returns with fresh external volume, our order keeps the position it had
+  earned rather than re-queueing behind the newcomers. Aggregate data cannot tell
+  a returning level from a persistent one, and this errs in our favour.
 - The penalty, when enabled, is linear in depth and ignores participation rate.
   It is a configurable slippage model, not an empirically calibrated one.
 

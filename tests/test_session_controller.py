@@ -156,3 +156,37 @@ def test_realism_extensions_run_end_to_end(tmp_path: Path, controller: SessionCo
     run_config = json.loads((Path(snapshot["output_dir"]) / "run-config.json").read_text())
     assert run_config["queue_turnover"] is True
     assert run_config["market_impact_ticks_per_level"] == 1
+
+
+def test_pause_does_not_outlive_the_session(tmp_path: Path, controller: SessionController) -> None:
+    """A finished run must not report itself as paused.
+
+    Pausing sets an event the feed waits on. Left set past completion it would
+    show a finished session as "COMPLETED · PAUSED" with a Resume button.
+    """
+    controller.start(_config(tmp_path, rows=400, rate=0.001))
+    for _ in range(100):
+        if controller.state is SessionState.RUNNING:
+            break
+        time.sleep(0.1)
+
+    controller.pause()
+    assert controller.snapshot()["paused"] is True
+
+    controller.stop()
+    snapshot = _run(controller, timeout=60.0)
+
+    assert snapshot["state"] in (SessionState.COMPLETED, SessionState.FAILED)
+    assert snapshot["paused"] is False
+
+
+def test_log_endpoint_reads_the_output_dir_without_a_snapshot(tmp_path: Path,
+                                                              controller: SessionController) -> None:
+    """The Log tab polls every second; it must not serialise telemetry to do it."""
+    assert controller.output_dir is None
+
+    controller.start(_config(tmp_path, rows=200, rate=0.0))
+    _run(controller, timeout=90.0)
+
+    assert controller.output_dir is not None
+    assert (controller.output_dir / "system.log").exists()
